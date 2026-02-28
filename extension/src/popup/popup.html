@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lawmate</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <img src="../assets/icon48.png" alt="Lawmate" class="logo">
+    <h1>Lawmate</h1>
+  </div>
+
+  <!-- User Status Section -->
+  <div id="userSection" class="section">
+    <div id="loggedInView" class="hidden">
+      <div class="user-info">
+        <div class="avatar">
+          <span id="userInitials">LA</span>
+        </div>
+        <div class="user-details">
+          <div class="user-name" id="userName">Loading...</div>
+          <div class="user-khc-id" id="userKhcId">KHC ID</div>
+        </div>
+      </div>
+      
+      <div class="sync-status">
+        <div class="status-item">
+          <span class="label">Last Sync:</span>
+          <span id="lastSync" class="value">Never</span>
+        </div>
+        <div class="status-item">
+          <span class="label">Cases Synced:</span>
+          <span id="caseCount" class="value">0</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="loggedOutView" class="hidden">
+      <div class="empty-state">
+        <p>Sign in to the extension to start syncing your cases.</p>
+        <form id="loginForm" class="login-form">
+          <input id="loginEmail" class="input" type="email" placeholder="Email" autocomplete="username" required>
+          <input id="loginPassword" class="input" type="password" placeholder="Password" autocomplete="current-password" required>
+          <button id="loginButton" class="btn btn-primary btn-block" type="submit">
+            Log In
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actions Section -->
+  <div id="actionsSection" class="section hidden">
+    <button id="syncNowButton" class="btn btn-primary btn-block">
+      <span class="btn-icon">🔄</span>
+      Sync Now
+    </button>
+    
+    <button id="openDashboardButton" class="btn btn-secondary btn-block">
+      <span class="btn-icon">📊</span>
+      Open Dashboard
+    </button>
+  </div>
+
+  <!-- Settings Section -->
+  <div class="section">
+    <div class="settings-item">
+      <label class="toggle-label">
+        <input type="checkbox" id="autoSyncToggle">
+        <span class="toggle-slider"></span>
+        <span class="toggle-text">Auto-sync on page load</span>
+      </label>
+    </div>
+    
+    <div class="settings-item">
+      <button id="clearCacheButton" class="btn btn-text">
+        Clear Cache
+      </button>
+    </div>
+    
+    <div class="settings-item">
+      <button id="logoutButton" class="btn btn-text btn-danger hidden">
+        Logout
+      </button>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <a href="https://lawmate.in" target="_blank">lawmate.in</a>
+    <span class="version">v1.1.0</span>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <p id="loadingText">Loading...</p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
