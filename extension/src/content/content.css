@@ -1,0 +1,69 @@
+/* src/content/content.css */
+
+/* Lawmate status cell styling */
+.lawmate-status-cell {
+  min-width: 120px;
+  padding: 8px !important;
+}
+
+.lawmate-sync-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-icon {
+  font-size: 16px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.lawmate-sync-status[data-status="syncing"] .status-icon,
+.lawmate-sync-status[data-status="uploading"] .status-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Notification animations */
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+}
+
+/* Hover effect for sync button */
+#lawmate-sync-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+}
+
+#lawmate-sync-button:active {
+  transform: translateY(0);
+}
