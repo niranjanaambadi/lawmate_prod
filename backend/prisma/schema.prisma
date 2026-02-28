@@ -1,0 +1,706 @@
+// prisma/schema.prisma - Gold standard schema (migrations run from backend)
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+model User {
+  id                    String    @db.Uuid @id @default(uuid())
+  email                 String    @unique @db.VarChar(255)
+  mobile                String?   @unique @db.VarChar(15)
+  passwordHash          String    @map("password_hash") @db.VarChar(255)
+  khcAdvocateId         String    @unique @map("khc_advocate_id") @db.VarChar(50)
+  khcAdvocateName       String    @map("khc_advocate_name") @db.VarChar(255)
+  khcEnrollmentNumber   String?   @map("khc_enrollment_number") @db.VarChar(50)
+  role                  UserRole  @default(ADVOCATE)
+  isActive              Boolean   @default(true) @map("is_active")
+  isVerified            Boolean   @default(false) @map("is_verified")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at")
+  lastLoginAt              DateTime?  @map("last_login_at")
+  lastSyncAt               DateTime?  @map("last_sync_at")
+  passwordResetToken       String?    @map("password_reset_token") @db.VarChar(255)
+  passwordResetTokenExpiry DateTime?  @map("password_reset_token_expiry")
+  preferences              Json       @default("{}") @db.JsonB
+  calendarEvents      CalendarEvent[]
+  calendarSyncToken   CalendarSyncToken?
+  advocateCauseLists  AdvocateCauseList[]
+
+  cases                 Case[]
+  aiAnalyses            AIAnalysis[]
+
+  subscriptions         Subscription[]
+  usageTracking         UsageTracking[]
+
+  @@index([email, isActive], map: "idx_user_login")
+  @@index([khcAdvocateId, isActive], map: "idx_user_khc")
+  @@map("users")
+}
+
+enum UserRole {
+  ADVOCATE @map("advocate")
+  ADMIN    @map("admin")
+
+  @@map("user_role")
+}
+
+// ============================================
+// CASE MANAGEMENT
+// ============================================
+
+model Case {
+  id                  String         @id @default(uuid()) @db.Uuid
+  advocateId          String         @map("advocate_id") @db.Uuid
+  caseNumber          String?        @map("case_number") @db.VarChar(100)
+  efilingNumber       String         @unique @map("efiling_number") @db.VarChar(100)
+  caseType            String         @map("case_type") @db.VarChar(50)
+  caseYear            Int            @map("case_year")
+  partyRole           CasePartyRole  @map("party_role")
+  petitionerName      String         @map("petitioner_name") @db.Text
+  respondentName      String         @map("respondent_name") @db.Text
+  efilingDate         DateTime       @map("efiling_date")
+  efilingDetails      String?        @map("efiling_details") @db.Text
+  benchType           String?        @map("bench_type") @db.VarChar(50)
+  judgeName           String?        @map("judge_name") @db.VarChar(255)
+  courtNumber         String?        @map("court_number") @db.VarChar(50)
+  status              CaseStatus     @default(FILED)
+  nextHearingDate     DateTime?      @map("next_hearing_date")
+  khcSourceUrl        String?        @map("khc_source_url") @db.Text
+  lastSyncedAt        DateTime?      @map("last_synced_at")
+  syncStatus          String         @default("pending") @map("sync_status") @db.VarChar(50)
+  searchVector        String?        @map("search_vector")
+  isVisible           Boolean        @default(true) @map("is_visible")
+  transferredReason   String?        @map("transferred_reason") @db.Text
+  transferredAt       DateTime?      @map("transferred_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @default(now()) @updatedAt @map("updated_at")
+
+  advocate            User           @relation(fields: [advocateId], references: [id], onDelete: Cascade)
+  documents           Document[]
+  history             CaseHistory[]
+  aiAnalysis          AIAnalysis?
+  hearingBriefs       HearingBrief[]
+  calendarEvents      CalendarEvent[]
+
+
+  @@index([advocateId, status, isVisible], map: "idx_case_advocate_status")
+  @@index([advocateId, nextHearingDate], map: "idx_case_advocate_hearing")
+  @@map("cases")
+}
+
+enum CaseStatus {
+  FILED        @map("filed")
+  REGISTERED   @map("registered")
+  PENDING      @map("pending")
+  DISPOSED     @map("disposed")
+  TRANSFERRED  @map("transferred")
+
+  @@map("case_status")
+}
+
+enum CasePartyRole {
+  PETITIONER  @map("petitioner")
+  RESPONDENT  @map("respondent")
+  APPELLANT   @map("appellant")
+  DEFENDANT   @map("defendant")
+
+  @@map("case_party_role")
+}
+
+// ============================================
+// DOCUMENT MANAGEMENT
+// ============================================
+
+model Document {
+  id                String           @id @default(uuid()) @db.Uuid
+  caseId            String           @map("case_id") @db.Uuid
+  khcDocumentId     String           @map("khc_document_id") @db.VarChar(100)
+  category          DocumentCategory
+  title             String           @db.VarChar(255)
+  description       String?          @db.Text
+  s3Key             String           @unique @map("s3_key") @db.VarChar(500)
+  s3Bucket          String           @default("lawmate-case-pdfs") @map("s3_bucket") @db.VarChar(100)
+  s3VersionId       String?          @map("s3_version_id") @db.VarChar(100)
+  fileSize          BigInt           @map("file_size")
+  contentType       String           @default("application/pdf") @map("content_type") @db.VarChar(50)
+  checksumMd5       String?          @map("checksum_md5") @db.VarChar(32)
+  uploadStatus      UploadStatus     @default(PENDING) @map("upload_status")
+  uploadedAt        DateTime?        @map("uploaded_at")
+  uploadError       String?          @map("upload_error") @db.Text
+  sourceUrl         String?          @map("source_url") @db.Text
+  isOcrRequired     Boolean          @default(false) @map("is_ocr_required")
+  ocrStatus         OcrStatus        @default(NOT_REQUIRED) @map("ocr_status")
+  ocrJobId          String?          @map("ocr_job_id") @db.VarChar(255)
+  extractedText     String?          @map("extracted_text") @db.Text
+  classificationConfidence Float?    @map("classification_confidence")
+  aiMetadata        Json?            @map("ai_metadata") @db.JsonB
+  isLocked          Boolean          @default(false) @map("is_locked")
+  lockReason        String?          @map("lock_reason") @db.VarChar(255)
+  lockedAt          DateTime?        @map("locked_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at")
+
+  case              Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  orders            CaseHistory[]
+
+  @@index([caseId, category], map: "idx_doc_case_category")
+  @@map("documents")
+}
+
+enum DocumentCategory {
+  CASE_FILE  @map("case_file")
+  ANNEXURE   @map("annexure")
+  JUDGMENT   @map("judgment")
+  ORDER      @map("order")
+  MISC       @map("misc")
+
+  @@map("document_category")
+}
+
+enum UploadStatus {
+  PENDING    @map("pending")
+  UPLOADING  @map("uploading")
+  COMPLETED  @map("completed")
+  FAILED     @map("failed")
+
+  @@map("upload_status")
+}
+
+enum OcrStatus {
+  NOT_REQUIRED @map("not_required")
+  PENDING      @map("pending")
+  PROCESSING   @map("processing")
+  COMPLETED    @map("completed")
+  FAILED       @map("failed")
+
+  @@map("ocr_status")
+}
+
+// ============================================
+// CASE HISTORY
+// ============================================
+
+model CaseHistory {
+  id               String        @id @default(uuid()) @db.Uuid
+  caseId           String        @map("case_id") @db.Uuid
+  eventType        CaseEventType @map("event_type")
+  eventDate        DateTime      @map("event_date")
+  businessRecorded String        @map("business_recorded") @db.Text
+  judgeName        String?       @map("judge_name") @db.VarChar(255)
+  benchType        String?       @map("bench_type") @db.VarChar(50)
+  courtNumber      String?       @map("court_number") @db.VarChar(50)
+  nextHearingDate  DateTime?     @map("next_hearing_date")
+  orderDocumentId  String?       @map("order_document_id") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  case             Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  orderDocument    Document?     @relation(fields: [orderDocumentId], references: [id])
+
+  @@index([caseId, eventDate], map: "idx_history_case_date")
+  @@map("case_history")
+}
+
+model CauseListEntry {
+  id                   String          @id @default(uuid()) @db.Uuid
+  caseNumber           String          @map("case_number") @db.VarChar(100)
+  normalizedCaseNumber String          @map("normalized_case_number") @db.VarChar(120)
+  listingDate          DateTime        @map("listing_date") @db.Date
+  source               CauseListSource
+  courtNumber          String?         @map("court_number") @db.VarChar(50)
+  benchName            String?         @map("bench_name") @db.VarChar(255)
+  partyNames           String?         @map("party_names") @db.Text
+  itemNo               String?         @map("item_no") @db.VarChar(30)
+  fetchedFromUrl       String?         @map("fetched_from_url") @db.Text
+  rawData              Json?           @map("raw_data") @db.JsonB
+  ingestionRunId       String?         @map("ingestion_run_id") @db.Uuid
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([normalizedCaseNumber, listingDate, source, courtNumber, itemNo], map: "uq_cause_list_case_date_source")
+  @@index([listingDate, source], map: "ix_cause_list_date_source")
+  @@map("cause_list_entries")
+}
+
+enum CaseEventType {
+  HEARING @map("hearing")
+  ORDER   @map("order")
+  JUDGMENT @map("judgment")
+  FILING  @map("filing")
+  NOTICE  @map("notice")
+
+  @@map("case_event_type")
+}
+
+enum CauseListSource {
+  DAILY    @map("daily")
+  WEEKLY   @map("weekly")
+  ADVANCED @map("advanced")
+  MONTHLY  @map("monthly")
+
+  @@map("cause_list_source")
+}
+
+model CauseListIngestionRun {
+  id              String          @id @default(uuid()) @db.Uuid
+  source          CauseListSource
+  listingDate     DateTime        @map("listing_date") @db.Date
+  fetchedFromUrl  String          @map("fetched_from_url") @db.Text
+  s3Bucket        String          @map("s3_bucket") @db.VarChar(100)
+  s3Key           String          @unique @map("s3_key") @db.VarChar(500)
+  status          String          @default("fetched") @db.VarChar(30)
+  error           String?         @db.Text
+  recordsFound    Int             @default(0) @map("records_found")
+  recordsUpserted Int             @default(0) @map("records_upserted")
+  fetchedAt       DateTime        @default(now()) @map("fetched_at")
+  parsedAt        DateTime?       @map("parsed_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at")
+
+  @@index([source, listingDate], map: "ix_cause_list_ingestion_source_date")
+  @@map("cause_list_ingestion_runs")
+}
+
+// ============================================
+// AI ANALYSIS SYSTEM
+// ============================================
+
+model AIAnalysis {
+  id                    String              @id @default(uuid()) @db.Uuid
+  caseId                String              @unique @map("case_id") @db.Uuid
+  advocateId            String              @map("advocate_id") @db.Uuid
+  status                AIAnalysisStatus    @default(PENDING)
+  modelVersion          String              @default("claude-3.5-sonnet") @map("model_version") @db.VarChar(50)
+  analysis              Json?               @db.JsonB
+  urgencyLevel          UrgencyLevel?       @map("urgency_level")
+  caseSummary           String?             @map("case_summary") @db.Text
+  processedAt           DateTime?           @map("processed_at")
+  processingTimeSeconds Int?                @map("processing_time_seconds")
+  tokenCount            Int?                @map("token_count")
+  errorMessage          String?             @map("error_message") @db.Text
+  retryCount            Int                 @default(0) @map("retry_count")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @default(now()) @updatedAt @map("updated_at")
+
+  case                  Case                @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  advocate              User                @relation(fields: [advocateId], references: [id], onDelete: Cascade)
+
+  @@index([advocateId, urgencyLevel], map: "idx_ai_advocate_urgency")
+  @@map("ai_analyses")
+}
+
+enum AIAnalysisStatus {
+  PENDING    @map("pending")
+  PROCESSING @map("processing")
+  COMPLETED  @map("completed")
+  FAILED     @map("failed")
+
+  @@map("ai_analysis_status")
+}
+
+enum UrgencyLevel {
+  LOW      @map("low")
+  MEDIUM   @map("medium")
+  HIGH     @map("high")
+  CRITICAL @map("critical")
+
+  @@map("urgency_level")
+}
+
+// ============================================
+// AI INSIGHTS
+// ============================================
+
+model AIInsight {
+  id            String            @id @default(uuid()) @db.Uuid
+  caseId        String            @map("case_id") @db.Uuid
+  insightType   AIInsightType     @map("insight_type")
+  result        Json              @db.JsonB
+  model         String            @default("anthropic.claude-3-haiku-20240307-v1:0")
+  tokensUsed    Int?              @map("tokens_used")
+  status        InsightStatus     @default(COMPLETED)
+  error         String?           @db.Text
+  cached        Boolean           @default(false)
+  cacheKey      String?           @map("cache_key") @db.VarChar(255)
+  createdAt     DateTime          @default(now()) @map("created_at")
+  expiresAt     DateTime?         @map("expires_at")
+
+  @@index([caseId, insightType], map: "idx_insight_case_type")
+  @@index([cacheKey], map: "idx_insight_cache")
+  @@map("ai_insights")
+}
+
+enum AIInsightType {
+  BUNDLE_ANALYSIS      @map("bundle_analysis")
+  PRECEDENTS           @map("precedents")
+  RISK_ASSESSMENT      @map("risk_assessment")
+  RIGHTS_MAPPING       @map("rights_mapping")
+  NARRATIVE            @map("narrative")
+  COUNTER_ANTICIPATION @map("counter_anticipation")
+  RELIEF_EVALUATION    @map("relief_evaluation")
+
+  @@map("ai_insight_type")
+}
+
+enum InsightStatus {
+  PENDING    @map("pending")
+  PROCESSING @map("processing")
+  COMPLETED  @map("completed")
+  FAILED     @map("failed")
+
+  @@map("insight_status")
+}
+
+// ============================================
+// HEARING BRIEFS
+// ============================================
+
+model HearingBrief {
+  id              String    @id @default(uuid()) @db.Uuid
+  caseId          String    @map("case_id") @db.Uuid
+  hearingDate     DateTime  @map("hearing_date")
+  content         String    @db.Text
+  focusAreas      String[]  @map("focus_areas")
+  bundleSnapshot  Json?     @map("bundle_snapshot") @db.JsonB
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  case            Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, hearingDate], map: "idx_brief_case_hearing")
+  @@map("hearing_briefs")
+}
+
+// ============================================
+// SUBSCRIPTION & BILLING
+// ============================================
+
+model Subscription {
+  id              String              @id @default(uuid()) @db.Uuid
+  userId          String              @map("user_id") @db.Uuid
+  plan            SubscriptionPlan    @default(FREE)
+  status          SubscriptionStatus  @default(TRIAL)
+  billingCycle    BillingCycle        @default(MONTHLY) @map("billing_cycle")
+  amount          Int                 @default(0)
+  currency        String              @default("INR") @db.VarChar(3)
+  startDate       DateTime            @map("start_date")
+  endDate         DateTime            @map("end_date")
+  trialEndDate    DateTime?           @map("trial_end_date")
+  autoRenew       Boolean             @default(true) @map("auto_renew")
+  paymentMethod   PaymentMethod?      @map("payment_method")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at")
+
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoices        Invoice[]
+
+  @@index([userId, status], map: "idx_subscription_user_status")
+  @@map("subscriptions")
+}
+
+enum SubscriptionPlan {
+  FREE          @map("free")
+  PROFESSIONAL  @map("professional")
+  ENTERPRISE    @map("enterprise")
+
+  @@map("subscription_plan")
+}
+
+enum SubscriptionStatus {
+  ACTIVE    @map("active")
+  CANCELLED @map("cancelled")
+  EXPIRED   @map("expired")
+  TRIAL     @map("trial")
+
+  @@map("subscription_status")
+}
+
+enum BillingCycle {
+  MONTHLY   @map("monthly")
+  ANNUALLY  @map("annually")
+
+  @@map("billing_cycle")
+}
+
+enum PaymentMethod {
+  UPI        @map("upi")
+  CARD       @map("card")
+  NETBANKING @map("netbanking")
+  NONE       @map("none")
+
+  @@map("payment_method")
+}
+
+model Invoice {
+  id              String         @id @default(uuid()) @db.Uuid
+  subscriptionId  String         @map("subscription_id") @db.Uuid
+  amount          Int
+  currency        String         @default("INR") @db.VarChar(3)
+  status          InvoiceStatus  @default(PENDING)
+  invoiceDate     DateTime       @map("invoice_date")
+  dueDate         DateTime       @map("due_date")
+  paidDate        DateTime?      @map("paid_date")
+  paymentMethod   PaymentMethod? @map("payment_method")
+  invoiceUrl      String?        @map("invoice_url") @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  subscription    Subscription   @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, status], map: "idx_invoice_subscription_status")
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  PAID    @map("paid")
+  PENDING @map("pending")
+  FAILED  @map("failed")
+
+  @@map("invoice_status")
+}
+
+model UsageTracking {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  periodStart      DateTime @map("period_start")
+  periodEnd        DateTime @map("period_end")
+  casesCount       Int      @default(0) @map("cases_count")
+  documentsCount   Int      @default(0) @map("documents_count")
+  storageUsedBytes BigInt   @default(0) @map("storage_used_bytes")
+  aiAnalysesUsed   Int      @default(0) @map("ai_analyses_used")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, periodStart])
+  @@index([userId, periodEnd], map: "idx_usage_user_period")
+  @@map("usage_tracking")
+}
+
+enum CalendarEventType {
+  HEARING  @map("hearing")
+  DEADLINE @map("deadline")
+  FILING   @map("filing")
+  REMINDER @map("reminder")
+  MEETING  @map("meeting")
+  OTHER    @map("other")
+
+  @@map("calendareventtype")
+}
+
+enum CalendarEventSource {
+  AGENT      @map("agent")
+  MANUAL     @map("manual")
+  COURT_SYNC @map("court_sync")
+
+  @@map("calendareventsource")
+}
+
+enum AdvocateCauseListFetchStatus {
+  FETCHED @map("fetched")
+  FAILED  @map("failed")
+
+  @@map("advocatecauselistfetchstatus")
+}
+
+model CalendarEvent {
+  id              String              @id @default(uuid()) @db.Uuid
+  lawyerId        String              @map("lawyer_id") @db.Uuid
+  caseId          String?             @map("case_id") @db.Uuid
+  title           String              @db.VarChar(255)
+  description     String?             @db.Text
+  eventType       CalendarEventType   @default(OTHER) @map("event_type")
+  source          CalendarEventSource @default(MANUAL)
+  startDatetime   DateTime            @map("start_datetime")
+  endDatetime     DateTime?           @map("end_datetime")
+  allDay          Boolean             @default(false) @map("all_day")
+  location        String?             @db.VarChar(255)
+  googleEventId   String?             @map("google_event_id") @db.VarChar(255)
+  googleSyncedAt  DateTime?           @map("google_synced_at")
+  googleSyncError String?             @map("google_sync_error") @db.Text
+  isActive        Boolean             @default(true) @map("is_active")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at")
+
+  lawyer          User                @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  case            Case?               @relation(fields: [caseId], references: [id], onDelete: SetNull)
+
+  @@index([lawyerId, startDatetime], map: "ix_calendar_events_lawyer_start")
+  @@index([lawyerId, eventType, isActive], map: "ix_calendar_events_lawyer_type")
+  @@index([caseId, startDatetime], map: "ix_calendar_events_case")
+  @@index([lawyerId, isActive, googleSyncedAt], map: "ix_calendar_events_sync_pending")
+  @@map("calendar_events")
+}
+
+model CalendarSyncToken {
+  id                     String    @id @default(uuid()) @db.Uuid
+  lawyerId               String    @unique @map("lawyer_id") @db.Uuid
+  googleRefreshTokenEnc  String    @map("google_refresh_token_enc") @db.Text
+  googleAccessTokenEnc   String?   @map("google_access_token_enc") @db.Text
+  googleTokenExpiry      DateTime? @map("google_token_expiry")
+  googleCalendarId       String    @default("primary") @map("google_calendar_id") @db.VarChar(255)
+  googleSyncToken        String?   @map("google_sync_token") @db.Text
+  lastSyncedAt           DateTime? @map("last_synced_at")
+  lastSyncError          String?   @map("last_sync_error") @db.Text
+  isActive               Boolean   @default(true) @map("is_active")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  lawyer                 User      @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+
+  @@map("calendar_sync_tokens")
+}
+
+model AdvocateCauseList {
+  id              String                        @id @default(uuid()) @db.Uuid
+  lawyerId        String                        @map("lawyer_id") @db.Uuid
+  advocateName    String                        @map("advocate_name") @db.VarChar(255)
+  advocateCode    String?                       @map("advocate_code") @db.VarChar(50)
+  date            DateTime                      @db.Date
+  itemNo          Int?                          @map("item_no")
+  courtHall       String?                       @map("court_hall") @db.VarChar(100)
+  courtHallNumber Int?                          @map("court_hall_number")
+  bench           String?                       @db.VarChar(20)
+  listType        String?                       @map("list_type") @db.VarChar(100)
+  judgeName       String?                       @map("judge_name") @db.VarChar(255)
+  caseNo          String?                       @map("case_no") @db.VarChar(120)
+  petitioner      String?                       @db.VarChar(255)
+  respondent      String?                       @db.VarChar(255)
+  fetchStatus     AdvocateCauseListFetchStatus  @default(FETCHED) @map("fetch_status")
+  fetchError      String?                       @map("fetch_error") @db.Text
+  sourceUrl       String?                       @map("source_url") @db.Text
+  fetchedAt       DateTime                      @default(now()) @map("fetched_at")
+  createdAt       DateTime                      @default(now()) @map("created_at")
+  updatedAt       DateTime                      @default(now()) @updatedAt @map("updated_at")
+
+  lawyer          User                          @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+
+  @@unique([lawyerId, advocateName, date, caseNo], map: "uq_advocate_cause_lists_lawyer_adv_date_case")
+  @@index([lawyerId, date], map: "ix_advocate_cause_lists_lawyer_date")
+  @@index([date, courtHallNumber], map: "ix_advocate_cause_lists_date_court")
+  @@index([date, caseNo], map: "ix_advocate_cause_lists_date_case")
+  @@map("advocate_cause_lists")
+}
+
+// ============================================
+// MEDIATION LIST
+// ============================================
+
+/// Case numbers extracted from the MEDIATION LIST section at the end of the
+/// daily cause-list PDF.  Advocate names are NOT in the PDF for this section;
+/// they are discovered by fetching each case from the court portal (enrichment).
+model MediationListCase {
+  id                   String    @id @default(uuid()) @db.Uuid
+  listingDate          DateTime  @map("listing_date") @db.Date
+  serialNumber         String    @map("serial_number") @db.VarChar(30)
+  caseNumberRaw        String    @map("case_number_raw") @db.VarChar(120)
+  courtNumber          String?   @map("court_number") @db.VarChar(30)
+  rawText              String?   @map("raw_text")
+
+  /// Enrichment lifecycle: pending → fetching → fetched | failed
+  fetchStatus          String    @default("pending") @map("fetch_status") @db.VarChar(20)
+  fetchAttempts        Int       @default(0) @map("fetch_attempts")
+  lastFetchError       String?   @map("last_fetch_error")
+  fetchedAt            DateTime? @map("fetched_at")
+
+  /// Populated after court portal fetch
+  petitionerNames      Json?     @map("petitioner_names")       // String[]
+  respondentNames      Json?     @map("respondent_names")       // String[]
+  petitionerAdvocates  Json?     @map("petitioner_advocates")   // String[]
+  respondentAdvocates  Json?     @map("respondent_advocates")   // String[]
+  caseDetailRaw        Json?     @map("case_detail_raw")
+
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([listingDate, caseNumberRaw], map: "uq_mediation_list_date_case")
+  @@index([listingDate], map: "ix_mediation_list_date")
+  @@index([listingDate, fetchStatus], map: "ix_mediation_list_date_status")
+  @@map("mediation_list_cases")
+}
+
+// ============================================
+// LEGAL INSIGHT — JUDGMENT SUMMARIZER
+// ============================================
+
+enum LegalInsightJobStatus {
+  QUEUED
+  EXTRACTING
+  OCR
+  SUMMARIZING
+  VALIDATING
+  COMPLETED
+  FAILED
+
+  @@map("legal_insight_job_status")
+}
+
+/// One job per (user, document) summarization request.
+/// Results are cached by (pdf_sha256 + model_id + prompt_version).
+model LegalInsightJob {
+  id            String                 @id @default(uuid()) @db.Uuid
+  userId        String                 @map("user_id") @db.Uuid
+  documentId    String                 @map("document_id") @db.Uuid
+  status        LegalInsightJobStatus  @default(QUEUED)
+  progress      Int                    @default(0)
+  modelId       String                 @map("model_id") @db.VarChar(200)
+  promptVersion String                 @default("v1") @map("prompt_version") @db.VarChar(20)
+  error         String?
+  pdfSha256     String?                @map("pdf_sha256") @db.VarChar(64)
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @default(now()) @updatedAt @map("updated_at")
+  completedAt   DateTime?              @map("completed_at")
+
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document      Document               @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunks        LegalInsightChunk[]
+  result        LegalInsightResult?
+
+  @@index([userId], map: "ix_legal_insight_jobs_user_id")
+  @@index([documentId], map: "ix_legal_insight_jobs_document_id")
+  @@index([status], map: "ix_legal_insight_jobs_status")
+  @@index([pdfSha256, modelId, promptVersion], map: "ix_legal_insight_jobs_sha_model")
+  @@map("legal_insight_jobs")
+}
+
+/// One row per text block extracted from the judgment PDF.
+/// chunk_id is a stable key (e.g. "chunk_000123") used in LLM prompts.
+/// bbox is stored as percentage of page dimensions (0–100) for the PDF viewer.
+model LegalInsightChunk {
+  id            String           @id @default(uuid()) @db.Uuid
+  jobId         String           @map("job_id") @db.Uuid
+  chunkId       String           @map("chunk_id") @db.VarChar(50)
+  pageNumber    Int              @map("page_number")
+  bbox          Json?            // {x, y, width, height} in %
+  text          String
+  charStart     Int?             @map("char_start")
+  charEnd       Int?             @map("char_end")
+  parentChunkId String?          @map("parent_chunk_id") @db.VarChar(50)
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  job           LegalInsightJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, chunkId], map: "uq_legal_insight_chunk_job_chunk")
+  @@index([jobId, chunkId], map: "ix_legal_insight_chunks_job_chunk")
+  @@map("legal_insight_chunks")
+}
+
+/// Validated JSON output for a completed legal insight job.
+model LegalInsightResult {
+  id         String          @id @default(uuid()) @db.Uuid
+  jobId      String          @unique @map("job_id") @db.Uuid
+  resultJson Json            @map("result_json")
+  createdAt  DateTime        @default(now()) @map("created_at")
+
+  job        LegalInsightJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId], map: "ix_legal_insight_results_job_id")
+  @@map("legal_insight_results")
+}
