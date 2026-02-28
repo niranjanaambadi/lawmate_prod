@@ -1,0 +1,202 @@
+# agent/resources/registry.yaml
+#
+# Defines all legal resources indexed into the Bedrock Resources KB.
+# The agent's search_resources tool queries this KB.
+#
+# To add a new resource:
+#   1. Add an entry below
+#   2. Run: POST /api/v1/admin/resources/index
+#      or:  POST /api/v1/admin/resources/index?resource_id=<id>  (single)
+#
+# Resource types:
+#   url  — fetched live from the web at index time
+#   pdf  — downloaded from S3 and text-extracted
+#
+# Tags (use for filtering in search_resources tool):
+#   fees, filing, procedure, rules, limitation, constitution,
+#   bare_acts, practice_directions, efiling, criminal, civil,
+#   writ, appeal, bail, evidence
+# ──────────────────────────────────────────────────────────────────────────
+
+resources:
+
+  # ── Kerala HC Rules & Practice ─────────────────────────────────────────
+
+  - id: khc_rules_1971
+    name: Kerala High Court Rules 1971
+    type: url
+    url: https://www.hckreala.nic.in/sites/default/files/KHC%20Rules%201971.pdf
+    description: >
+      Complete Kerala High Court Rules 1971 — governing original side,
+      appellate side, writ jurisdiction, and general practice.
+    tags: [rules, procedure, filing, writ, appeal, civil, criminal]
+    version: "1971"
+
+  - id: khc_practice_directions
+    name: Kerala HC Practice Directions & Circulars
+    type: url
+    url: https://www.hckreala.nic.in/practice-directions
+    description: >
+      Latest practice directions and administrative circulars issued by
+      the Kerala High Court including COVID era directions, e-filing
+      directions, and mentioning procedure.
+    tags: [practice_directions, procedure, efiling]
+    version: "current"
+
+  - id: khc_efiling_guide
+    name: Kerala HC e-Filing User Guide
+    type: url
+    url: https://efiling.hckreala.nic.in/help
+    description: >
+      Step-by-step guide for e-filing at Kerala High Court —
+      document formats, fee payment, case number generation, and
+      defect rectification.
+    tags: [efiling, filing, procedure]
+    version: "current"
+
+  # ── Court Fees ─────────────────────────────────────────────────────────
+
+  - id: kerala_court_fees_act
+    name: Kerala Court Fees and Suits Valuation Act 1959
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/6355
+    description: >
+      Kerala Court Fees and Suits Valuation Act 1959 — schedule of
+      court fees for civil suits, writ petitions, appeals, and
+      miscellaneous applications in Kerala courts.
+    tags: [fees, civil, filing]
+    version: "current"
+
+  - id: khc_fee_schedule
+    name: Kerala HC Prescribed Fee Schedule
+    type: url
+    url: https://www.hckreala.nic.in/fee-schedule
+    description: >
+      Current court fee schedule for Kerala High Court filings —
+      writ petitions (Article 226), letters patent appeals,
+      OSA, criminal appeals, bail applications, and more.
+    tags: [fees, filing, writ, bail, criminal, appeal]
+    version: "current"
+
+  # ── Limitation ─────────────────────────────────────────────────────────
+
+  - id: limitation_act_1963
+    name: Limitation Act 1963
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/1565
+    description: >
+      Limitation Act 1963 with schedule of limitation periods —
+      civil suits, appeals, applications. Essential for computing
+      limitation and drafting condonation of delay applications.
+    tags: [limitation, civil, appeal, bare_acts]
+    version: "1963"
+
+  # ── Constitution & Writ Jurisdiction ───────────────────────────────────
+
+  - id: constitution_of_india
+    name: Constitution of India — Key Articles
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/15240
+    description: >
+      Constitution of India — Articles 12-35 (Fundamental Rights),
+      Articles 226-227 (High Court writ jurisdiction),
+      Articles 32 & 136 (Supreme Court), Articles 300A (property rights).
+      Core reference for writ petitions.
+    tags: [constitution, writ, fundamental_rights, bare_acts]
+    version: "current"
+
+  # ── Criminal Law ───────────────────────────────────────────────────────
+
+  - id: bnss_2023
+    name: Bharatiya Nagarik Suraksha Sanhita (BNSS) 2023
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/20062
+    description: >
+      Bharatiya Nagarik Suraksha Sanhita 2023 — replaces CrPC from
+      1 July 2024. Bail provisions (Sections 478-495), trial procedure,
+      appeals, and revision. Essential for criminal matters at KHC.
+    tags: [criminal, bail, procedure, bare_acts]
+    version: "2023"
+
+  - id: crpc_1973
+    name: Code of Criminal Procedure 1973 (CrPC)
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/1611
+    description: >
+      CrPC 1973 — applies to matters filed before 1 July 2024.
+      Bail (Sections 436-439), anticipatory bail (Section 438),
+      revision (Section 397), quashing (Section 482).
+    tags: [criminal, bail, procedure, bare_acts]
+    version: "1973"
+
+  - id: ipc_bns
+    name: Bharatiya Nyaya Sanhita (BNS) 2023 & IPC 1860
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/20086
+    description: >
+      BNS 2023 (replaces IPC from 1 July 2024) and IPC 1860.
+      Offences, punishments, and key sections frequently cited
+      at Kerala HC — 302, 307, 376, 420, 498A etc.
+    tags: [criminal, bare_acts]
+    version: "current"
+
+  # ── Civil Law ──────────────────────────────────────────────────────────
+
+  - id: cpc_1908
+    name: Code of Civil Procedure 1908 (CPC)
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/1566
+    description: >
+      CPC 1908 with Orders and Rules — pleadings (Order VI), discovery
+      (Order XI), injunctions (Order XXXIX), execution (Orders XXI-XXII),
+      appeals (Orders XLI-XLVII), revision (Section 115).
+    tags: [civil, procedure, appeal, bare_acts]
+    version: "current"
+
+  - id: specific_relief_act
+    name: Specific Relief Act 1963
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/1760
+    description: >
+      Specific Relief Act 1963 as amended in 2018 — specific performance,
+      injunctions, declaratory relief. 2018 amendments make specific
+      performance the rule, not the exception.
+    tags: [civil, bare_acts]
+    version: "1963-amended-2018"
+
+  # ── Evidence ───────────────────────────────────────────────────────────
+
+  - id: bsa_2023
+    name: Bharatiya Sakshya Adhiniyam (BSA) 2023
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/20085
+    description: >
+      Bharatiya Sakshya Adhiniyam 2023 — replaces Indian Evidence Act
+      from 1 July 2024. Admissibility, burden of proof, electronic
+      evidence (Section 63), expert opinion.
+    tags: [evidence, criminal, civil, bare_acts]
+    version: "2023"
+
+  # ── Land & Property (Kerala specific) ──────────────────────────────────
+
+  - id: kerala_land_acquisition
+    name: Right to Fair Compensation Act 2013 (LARR)
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/2107
+    description: >
+      Land Acquisition, Rehabilitation and Resettlement Act 2013 —
+      compensation calculation, social impact assessment, urgency clause,
+      reference to civil court. Frequently litigated at Kerala HC.
+    tags: [civil, bare_acts, land]
+    version: "2013"
+
+  - id: kerala_land_reforms_act
+    name: Kerala Land Reforms Act 1963
+    type: url
+    url: https://www.indiacode.nic.in/handle/123456789/6357
+    description: >
+      Kerala Land Reforms Act 1963 — land ceiling, tenancy rights,
+      surplus land, vesting. State-specific legislation frequently
+      arising in KHC writ petitions.
+    tags: [civil, bare_acts, land, writ]
+    version: "current"
