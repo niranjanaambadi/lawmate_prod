@@ -1,0 +1,576 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lawmate.in/schemas/cause-list/v1.2.0",
+  "title": "KeralaHighCourtCauseList",
+  "description": "Complete schema for Kerala High Court daily cause list. One document per calendar date. Captures every field observed in the 772-page 18-Feb-2026 audit: all section types including mediation/arbitration, advocate roles, IAs, compliance items, urgent memo details, linked cases, parse warnings.",
+  "type": "object",
+  "required": ["metadata", "courts"],
+
+  "properties": {
+
+    "metadata": {
+      "description": "Top-level document header printed once at the start of the PDF",
+      "type": "object",
+      "required": ["court_name", "date_gregorian", "date_saka", "time", "source_pdf", "schema_version"],
+      "properties": {
+        "court_name":        { "type": "string", "example": "High Court of Kerala at Ernakulam" },
+        "date_gregorian":    { "type": "string", "format": "date", "example": "2026-02-18" },
+        "date_saka":         { "type": "string", "example": "29th Magha, 1947" },
+        "day_of_week":       { "type": "string", "example": "Wednesday" },
+        "time":              { "type": "string", "description": "Court sitting start time as printed", "example": "10:15 AM" },
+        "source_pdf":        { "type": "string", "description": "Filename or object-storage URL of the source PDF" },
+        "source_pdf_url":    { "type": ["string", "null"], "description": "Public download URL from the KHC website" },
+        "ingested_at":       { "type": "string", "format": "date-time", "description": "UTC timestamp when this document was ingested" },
+        "schema_version":    { "type": "string", "const": "1.2.0" },
+        "total_pages":       { "type": "integer", "description": "Total pages in source PDF — for completeness validation", "example": 772 },
+        "total_courts":      { "type": "integer", "description": "Total court bench blocks found — for completeness validation" },
+        "total_cases":       { "type": "integer", "description": "Total CaseItem rows across all courts — for completeness validation" },
+        "parse_warnings": {
+          "type": "array",
+          "description": "Non-fatal issues from ingestion — unknown section types, malformed numbers, truncated blocks etc.",
+          "items": {
+            "type": "object",
+            "required": ["warning_type", "message"],
+            "properties": {
+              "page_number":       { "type": ["integer", "null"] },
+              "warning_type": {
+                "type": "string",
+                "enum": [
+                  "UNKNOWN_SECTION_TYPE", "UNKNOWN_CASE_TYPE", "UNKNOWN_FILING_MODE",
+                  "MALFORMED_CASE_NUMBER", "MISSING_ADVOCATE", "TRUNCATED_TEXT", "OTHER"
+                ]
+              },
+              "message":           { "type": "string" },
+              "raw_text_snippet":  { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+
+    "courts": {
+      "type": "array",
+      "description": "All court benches and special lists (Mediation Centre, Arbitration Panel) in document order",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/Court" }
+    }
+  },
+
+  "definitions": {
+
+    "Court": {
+      "description": "A single court bench block — or Mediation Centre / Arbitration Panel block — with its presiding officers and all list sections for the day.",
+      "type": "object",
+      "required": ["court_id", "court_number", "judges", "lists"],
+      "properties": {
+        "court_id": {
+          "type": "string",
+          "description": "Synthetic unique key: {court_number}_{court_code}_{date_gregorian}",
+          "example": "1_5051_2026-02-18"
+        },
+        "court_number": {
+          "type": "string",
+          "description": "Court number as printed including alpha suffix. E.g. '1', '2B', '5D', '6B', '7A'. Use 'MED' for Mediation Centre.",
+          "example": "1"
+        },
+        "court_code": {
+          "type": "string",
+          "description": "4-digit room/hall code alongside the court number",
+          "example": "5051"
+        },
+        "court_label": {
+          "type": "string",
+          "description": "Full label exactly as printed",
+          "example": "Court No. 1 - 5051"
+        },
+        "is_division_bench":    { "type": "boolean", "default": false, "description": "True when exactly two judges sit together" },
+        "is_full_bench":        { "type": "boolean", "default": false, "description": "True when three or more judges constitute a Full Bench" },
+        "is_cj_court":          { "type": "boolean", "default": false, "description": "True if the Chief Justice presides" },
+        "is_mediation_centre":  { "type": "boolean", "default": false, "description": "True for the KHC Mediation Centre block. judges array will be empty." },
+        "is_arbitration_panel": { "type": "boolean", "default": false, "description": "True for a court-annexed arbitration panel block." },
+        "court_page_start":     { "type": "integer", "description": "PDF page (1-indexed) where this court block header first appears" },
+        "total_items":          { "type": "integer", "description": "Total CaseItem rows across all sections in this court" },
+        "judges": {
+          "type": "array",
+          "description": "Presiding judge(s). Single=1, Division=2, Full=3+. Empty for Mediation Centre.",
+          "items": { "$ref": "#/definitions/Judge" }
+        },
+        "lists": {
+          "type": "array",
+          "description": "All list sections within this court for the day, in printed order",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/CauseListSection" }
+        }
+      }
+    },
+
+    "Judge": {
+      "type": "object",
+      "required": ["full_name_raw"],
+      "properties": {
+        "full_name_raw":  { "type": "string", "description": "Name exactly as printed in the BEFORE: block", "example": "HON'BLE THE CHIEF JUSTICE MR. SOUMEN SEN" },
+        "short_name":     { "type": "string", "description": "Honorifics stripped, title-cased — for display and cross-day deduplication", "example": "Soumen Sen" },
+        "designation":    { "type": "string", "enum": ["Chief Justice", "Justice", "Arbitrator", "Other"] },
+        "honorific":      { "type": ["string", "null"], "description": "Personal title: MR. / MS. / MRS. / DR. etc.", "example": "MR." }
+      }
+    },
+
+    "CauseListSection": {
+      "description": "A named segment within a court block. A single court may have multiple sections (e.g. Admission + Separate List 1 + Urgent Memo).",
+      "type": "object",
+      "required": ["section_type", "section_label", "items"],
+      "properties": {
+        "section_type": {
+          "type": "string",
+          "description": "Normalised section category. Use OTHER if header does not match any known type, and record section_label verbatim.",
+          "enum": [
+            "ADMISSION",
+            "FOR_HEARING",
+            "DAILY_LIST",
+            "SEPARATE_LIST",
+            "SUPPLEMENTARY_LIST",
+            "URGENT_MEMO",
+            "CJ_COURT_LIST",
+            "BOARD_LIST",
+            "RETURNABLE_LIST",
+            "MEDIATION_LIST",
+            "ARBITRATION_LIST",
+            "SPECIAL_BENCH_LIST",
+            "VACATION_BENCH_LIST",
+            "TRANSFERRED_CASE_LIST",
+            "DEATH_REFERENCE_LIST",
+            "OTHER"
+          ]
+        },
+        "section_label": {
+          "type": "string",
+          "description": "Header exactly as printed: 'ADMISSION', 'FOR HEARING', 'CJ'S COURT CAUSELIST', 'DAILY LIST CAUSELIST', 'SEPARATE LIST 5', 'SUPPLEMENTARY LIST 1', 'URGENT MEMO', 'MEDIATION LIST', 'BOARD LIST', 'RETURNABLE LIST', 'DEATH REFERENCE LIST' etc.",
+          "example": "SEPARATE LIST 5"
+        },
+        "section_number": {
+          "type": ["integer", "null"],
+          "description": "Ordinal for numbered sections (SEPARATE_LIST 1…N, SUPPLEMENTARY_LIST 1…N). Null for un-numbered sections.",
+          "example": 5
+        },
+        "section_page_start": { "type": "integer", "description": "PDF page (1-indexed) where this section begins" },
+        "item_count":         { "type": "integer", "description": "CaseItem count in this section — for per-section validation" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CaseItem" }
+        }
+      }
+    },
+
+    "CaseItem": {
+      "description": "A single case row (one Sr.No. block) including parties, advocates, IAs, linked cases, compliance items, and section-specific details.",
+      "type": "object",
+      "required": ["serial_number", "case_number_raw", "case_type", "case_number", "case_year", "petitioner_names", "respondent_names", "advocates"],
+      "properties": {
+
+        "serial_number": {
+          "type": "string",
+          "description": "Sr.No. as printed. Plain string for top-level ('1', '506'). Dotted for sub-items ('1.1', '101.23'). Always string — never integer.",
+          "example": "1"
+        },
+        "is_sub_item": {
+          "type": "boolean",
+          "description": "True when serial_number contains a dot — this case is clubbed under a parent",
+          "default": false
+        },
+        "parent_serial_number": {
+          "type": ["string", "null"],
+          "description": "serial_number of parent CaseItem when is_sub_item is true",
+          "example": "1"
+        },
+
+        "case_number_raw": { "type": "string", "description": "Full case number exactly as printed", "example": "WP(PIL) 61/ 2025" },
+        "case_type": {
+          "type": "string",
+          "description": "Case type code parsed from case_number_raw. Open string — not enum-restricted because new types emerge with new legislation.",
+          "example": "WP(PIL)",
+          "examples": [
+            "WP(C)", "WP(PIL)", "WA", "CRP", "CMA", "FAO", "RSA", "SA", "Mat.Appeal", "Mat.Op",
+            "Crl.Appeal", "Crl.MC", "Crl.Rev.Pet", "OP(Crl.)", "OP", "OA", "RPFC",
+            "IA", "CM.Appl", "Crl.M.Appl", "CMAP", "Arb.OP", "Arb.Appeal",
+            "Comp.Appeal", "COMAP", "Tr.P(Crl.)", "Tr.P(C)", "Cont.Case(C)", "Cont.Case(Crl.)"
+          ]
+        },
+        "case_number":  { "type": "string", "example": "61" },
+        "case_year":    { "type": "integer", "example": 2025 },
+        "case_category": {
+          "type": "string",
+          "description": "Pre-computed broad category. Derivation: WP*/WA/CRP/CMA/FAO/RSA/SA/OP/OA/Mat.*/Arb.*/Comp.*/Tr.P(C)/Cont.Case(C) = CIVIL; Crl.*/OP(Crl.)/RPFC/Tr.P(Crl.)/Cont.Case(Crl.) = CRIMINAL; MEDIATION_LIST = MEDIATION; ARBITRATION_LIST = ARBITRATION.",
+          "enum": ["CIVIL", "CRIMINAL", "MEDIATION", "ARBITRATION", "OTHER"]
+        },
+
+        "filing_mode": {
+          "type": "string",
+          "description": "Normalised filing mode from the prefix printed under Sr.No.",
+          "enum": [
+            "ONLINE",
+            "ONLINE_SC",
+            "ONLINE_ADVOCATE",
+            "ONLINE_NOT_ADMITTED",
+            "OFFLINE",
+            "OFFLINE_SC",
+            "OFFLINE_NOT_ADMITTED",
+            "PARTY_IN_PERSON",
+            "UNKNOWN"
+          ]
+        },
+        "filing_mode_raw": {
+          "type": "string",
+          "description": "Filing mode exactly as printed, e.g. 'ONLINE', 'OFFLINE-SC', 'OFFLINE-NOT ADMITTED', 'ONLINE-ADVOCATE'",
+          "example": "OFFLINE-NOT ADMITTED"
+        },
+
+        "bench_type": {
+          "type": "string",
+          "description": "Bench composition — denormalised from parent Court judge count for fast filtering",
+          "enum": ["SINGLE", "DIVISION", "FULL_BENCH", "UNKNOWN"]
+        },
+
+        "petitioner_names": {
+          "type": "array",
+          "description": "Petitioner/appellant/applicant names as printed. Literal 'Others' preserved to represent '& Others'.",
+          "items": { "type": "string" },
+          "example": ["SAINU CHANDIR", "Others"]
+        },
+        "respondent_names": {
+          "type": "array",
+          "description": "Respondent/opposite-party names as printed",
+          "items": { "type": "string" },
+          "example": ["STATE OF KERALA", "Others"]
+        },
+        "party_in_person": {
+          "type": "boolean",
+          "description": "True when the petitioner appears without an advocate — indicated by party name printed in the advocate column or explicit 'PARTY IN PERSON' text",
+          "default": false
+        },
+
+        "remarks": {
+          "type": ["string", "null"],
+          "description": "Full remark block exactly as printed",
+          "example": "ADMITTED; SERVICE COMPLETE"
+        },
+        "status": {
+          "type": "string",
+          "description": "Normalised status derived from remarks. UNKNOWN when absent or unrecognised.",
+          "enum": [
+            "ADMITTED",
+            "NOT_ADMITTED",
+            "PART_HEARD",
+            "HEARD",
+            "SERVICE_COMPLETE",
+            "SERVICE_NOT_COMPLETE",
+            "JUDGMENT_RESERVED",
+            "ORDERS_RESERVED",
+            "DISMISSED",
+            "ALLOWED",
+            "DISPOSED",
+            "ADJOURNED",
+            "REFERRED_TO_MEDIATION",
+            "MEDIATION_REPORT_PENDING",
+            "MEDIATION_SETTLED",
+            "MEDIATION_FAILED",
+            "UNKNOWN"
+          ]
+        },
+
+        "order_date": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Date of a prior court order referenced in remarks — parsed from e.g. 'DOCUMENTS AS PER ORDER DTD 4.2.26 NOT RECEIVED'",
+          "example": "2026-02-04"
+        },
+        "next_listing_date": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Next hearing date if case is adjourned to a specific named date printed in the list",
+          "example": "2026-03-10"
+        },
+
+        "interim_order_expiry": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Expiry date of interim order — appears only in URGENT_MEMO section entries",
+          "example": "2026-02-13"
+        },
+        "urgent_memo_by": {
+          "type": ["string", "null"],
+          "description": "Advocate name from the 'URGENT MEMO BY:' field",
+          "example": "SMT.N.P.ASHA"
+        },
+        "urgent_memo_service_status": {
+          "type": ["string", "null"],
+          "description": "Service status as entered by applicant in urgent memo block, e.g. 'SERVICE IS NOT COMPLETE (ENTERED BY APPLICANT)'",
+          "example": "SERVICE IS NOT COMPLETE (ENTERED BY APPLICANT)"
+        },
+
+        "mediation": {
+          "description": "Populated for MEDIATION_LIST entries only. Null for all other sections.",
+          "oneOf": [ { "$ref": "#/definitions/MediationDetails" }, { "type": "null" } ]
+        },
+        "arbitration": {
+          "description": "Populated for ARBITRATION_LIST entries only. Null for all other sections.",
+          "oneOf": [ { "$ref": "#/definitions/ArbitrationDetails" }, { "type": "null" } ]
+        },
+
+        "advocates": {
+          "type": "object",
+          "description": "Structured advocate listing split by side. PARSING RULES: (1) The '———' dashed line separates petitioner advocates (above) from respondent advocates (below). (2) Multiple advocates on one line separated by '/' each become a separate AdvocateEntry. (3) First before '/' gets is_lead_advocate: true. (4) GP, PP, AG entries go into respondent_advocates with correct role enum.",
+          "required": ["petitioner_advocates", "respondent_advocates"],
+          "properties": {
+            "petitioner_advocates": {
+              "type": "array",
+              "description": "Advocates for petitioner/appellant/applicant side, in printed order",
+              "items": { "$ref": "#/definitions/AdvocateEntry" }
+            },
+            "respondent_advocates": {
+              "type": "array",
+              "description": "Advocates for respondent side. Each carries represented_parties. Includes GP, PP, AG entries.",
+              "items": { "$ref": "#/definitions/AdvocateEntry" }
+            },
+            "other_advocates": {
+              "type": "array",
+              "description": "Advocates of ambiguous or general capacity — Amicus Curiae, Court Commissioner, etc.",
+              "items": { "$ref": "#/definitions/AdvocateEntry" }
+            }
+          }
+        },
+
+        "interlocutory_applications": {
+          "type": "array",
+          "description": "All IAs / CM Applications / Crl.M.Appls clubbed under this case — the '& TYPE NUMBER/YEAR (PURPOSE)' lines",
+          "items": { "$ref": "#/definitions/InterlocutoryApplication" }
+        },
+
+        "linked_cases": {
+          "type": "array",
+          "description": "Cases cross-referenced via WITH or IN keywords",
+          "items": { "$ref": "#/definitions/LinkedCase" }
+        },
+
+        "pending_compliance": {
+          "type": "array",
+          "description": "Typed pending compliance items extracted from remarks — drives compliance alerts in the dashboard",
+          "items": { "$ref": "#/definitions/ComplianceItem" }
+        },
+
+        "page_number": {
+          "type": "integer",
+          "description": "PDF page (1-indexed) where this Sr.No. block begins — enables direct PDF page jump while app is PDF-backed"
+        },
+        "raw_text": {
+          "type": ["string", "null"],
+          "description": "Complete raw extracted text for this case item — for re-parsing and debug. Strip from all client-facing API responses."
+        }
+      }
+    },
+
+    "ComplianceItem": {
+      "description": "A single typed pending compliance requirement extracted from a case item's remarks block.",
+      "type": "object",
+      "required": ["description_raw", "compliance_type"],
+      "properties": {
+        "description_raw": {
+          "type": "string",
+          "description": "Compliance requirement text exactly as printed",
+          "example": "ADDL. DOCUMENTS NOT RECEIVED"
+        },
+        "compliance_type": {
+          "type": "string",
+          "enum": [
+            "COUNTER_AFFIDAVIT_NOT_RECEIVED",
+            "ADDITIONAL_DOCUMENTS_NOT_RECEIVED",
+            "ARGUMENT_NOTE_NOT_RECEIVED",
+            "PHYSICAL_COPY_NOT_RECEIVED",
+            "REPLY_AFFIDAVIT_NOT_RECEIVED",
+            "LAW_NOTES_NOT_RECEIVED",
+            "DOCUMENTS_AS_PER_ORDER_NOT_RECEIVED",
+            "SERVICE_NOT_COMPLETE",
+            "VAKALATNAMA_NOT_FILED",
+            "FEES_NOT_PAID",
+            "TRANSLATION_NOT_FILED",
+            "OTHER"
+          ]
+        },
+        "due_per_order_date": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Date of court order that mandated this compliance, if parseable from the remarks",
+          "example": "2026-02-04"
+        }
+      }
+    },
+
+    "MediationDetails": {
+      "description": "Fields specific to MEDIATION_LIST entries. All properties optional — mediation list verbosity varies.",
+      "type": "object",
+      "properties": {
+        "mediation_centre":          { "type": ["string", "null"], "example": "Kerala High Court Mediation Centre" },
+        "mediator_name":             { "type": ["string", "null"], "description": "Assigned mediator name as printed", "example": "Sri. K.P. Sreedharan" },
+        "mediation_file_number":     { "type": ["string", "null"], "description": "Mediation centre internal reference if separate from court case number", "example": "MED/HC/123/2025" },
+        "mediation_date":            { "type": ["string", "null"], "format": "date" },
+        "mediation_time":            { "type": ["string", "null"], "example": "10:30 AM" },
+        "mediation_venue":           { "type": ["string", "null"], "example": "Mediation Room No. 2" },
+        "mediation_stage": {
+          "type": "string",
+          "enum": ["FIRST_SITTING", "ONGOING", "FINAL_SITTING", "REPORT_PENDING", "SETTLED", "FAILED", "UNKNOWN"],
+          "default": "UNKNOWN"
+        },
+        "referral_court":            { "type": ["string", "null"], "description": "Court label that referred this case to mediation", "example": "Court No. 3" },
+        "referral_case_number_raw":  { "type": ["string", "null"], "description": "Original case number in the referring court if different", "example": "WP(C) 15000/ 2024" },
+        "parties_present_note":      { "type": ["string", "null"], "description": "Any printed note about required attendance or confirmed presence", "example": "Both parties to remain present with counsel" }
+      }
+    },
+
+    "ArbitrationDetails": {
+      "description": "Fields specific to ARBITRATION_LIST entries. All properties optional.",
+      "type": "object",
+      "properties": {
+        "arbitral_tribunal":         { "type": ["string", "null"], "example": "Sole Arbitrator Sri. M.K. Ramachandran" },
+        "arbitration_file_number":   { "type": ["string", "null"], "example": "ARB/HC/45/2024" },
+        "arbitration_stage": {
+          "type": "string",
+          "enum": ["PRELIMINARY_HEARING", "EVIDENCE", "ARGUMENTS", "AWARD_PENDING", "AWARD_PASSED", "UNKNOWN"],
+          "default": "UNKNOWN"
+        },
+        "arbitration_date":   { "type": ["string", "null"], "format": "date" },
+        "arbitration_time":   { "type": ["string", "null"], "example": "2:00 PM" },
+        "arbitration_venue":  { "type": ["string", "null"], "example": "Arbitration Room No. 1" }
+      }
+    },
+
+    "AdvocateEntry": {
+      "description": "A single advocate entry. PARSING RULES: (1) Split '/' into separate entries. (2) First before '/' = is_lead_advocate: true. (3) Role abbreviation map: SC=SENIOR_COUNSEL (or STANDING_COUNSEL when institutional context), GP=GOVERNMENT_PLEADER, PP=PUBLIC_PROSECUTOR, APP=ADDITIONAL_PUBLIC_PROSECUTOR, AG=ADVOCATE_GENERAL, AAG=ADDITIONAL_ADVOCATE_GENERAL, SPL.GP=SPECIAL_GOVERNMENT_PLEADER, CGC=CENTRAL_GOVERNMENT_COUNSEL, ASC=ADDITIONAL_STANDING_COUNSEL, DSG=DEPUTY_SOLICITOR_GENERAL, SG=SOLICITOR_GENERAL, B/O=BRIEF_ON_BEHALF_OF.",
+      "type": "object",
+      "required": ["name_raw"],
+      "properties": {
+        "name_raw": {
+          "type": "string",
+          "description": "Name exactly as printed after '/' split",
+          "example": "SHRI.KALEESWARAM RAJ"
+        },
+        "name_normalized": {
+          "type": "string",
+          "description": "Honorific stripped, title-cased — primary key for advocate dashboard queries and cross-day deduplication",
+          "example": "Kaleeswaram Raj"
+        },
+        "honorific": {
+          "type": ["string", "null"],
+          "description": "Printed prefix: SRI / SHRI / SMT / KUM / DR / ADV etc.",
+          "example": "SHRI"
+        },
+        "role": {
+          "type": "string",
+          "default": "ADVOCATE",
+          "enum": [
+            "ADVOCATE",
+            "SENIOR_COUNSEL",
+            "GOVERNMENT_PLEADER",
+            "ADDITIONAL_GOVERNMENT_PLEADER",
+            "PUBLIC_PROSECUTOR",
+            "ADDITIONAL_PUBLIC_PROSECUTOR",
+            "ADVOCATE_GENERAL",
+            "ADDITIONAL_ADVOCATE_GENERAL",
+            "SPECIAL_GOVERNMENT_PLEADER",
+            "CENTRAL_GOVERNMENT_COUNSEL",
+            "STANDING_COUNSEL",
+            "ADDITIONAL_STANDING_COUNSEL",
+            "DEPUTY_SOLICITOR_GENERAL",
+            "SOLICITOR_GENERAL",
+            "AMICUS_CURIAE",
+            "COURT_COMMISSIONER",
+            "MEDIATOR",
+            "ARBITRATOR",
+            "PARTY_IN_PERSON",
+            "NO_ADVOCATE",
+            "BRIEF_ON_BEHALF_OF",
+            "OTHER"
+          ]
+        },
+        "role_raw": {
+          "type": ["string", "null"],
+          "description": "Role annotation exactly as printed — e.g. 'SC, BPCL', 'ADDL. ADVOCATE GENERAL', 'SPL.G.P.(REVENUE)', 'CGC', 'B/O'",
+          "example": "SC, BHARAT PETROLEUM CORPORATION LIMITED (BPCL)"
+        },
+        "represented_parties": {
+          "type": "array",
+          "description": "Party labels this advocate is noted against — e.g. ['R1','R2','R7'], ['APPELLANT']. Empty array when not specified.",
+          "items": { "type": "string" },
+          "example": ["R1", "R2", "R7"]
+        },
+        "is_served": {
+          "type": ["boolean", "null"],
+          "description": "True if 'SERVED ON' printed next to entry. False if explicitly unserved. Null if not mentioned.",
+          "example": true
+        },
+        "organization": {
+          "type": ["string", "null"],
+          "description": "Institution explicitly named alongside the advocate entry",
+          "example": "KERALA STATE POLLUTION CONTROL BOARD"
+        },
+        "is_lead_advocate": {
+          "type": ["boolean", "null"],
+          "description": "True if first-listed on their side (before any '/' separator) — used for dashboard header display and push-notification targeting"
+        }
+      }
+    },
+
+    "InterlocutoryApplication": {
+      "description": "An IA, CM Application, Crl.M.Appl, or CMAP printed as '& TYPE NUMBER/YEAR' with optional purpose on the next line.",
+      "type": "object",
+      "required": ["ia_number_raw", "ia_type"],
+      "properties": {
+        "ia_number_raw": { "type": "string", "example": "& CM.Appl 1/2025" },
+        "ia_type":       { "type": "string", "description": "IA type code: IA, CM.Appl, Crl.M.Appl, CMAP etc.", "example": "CM.Appl" },
+        "ia_number":     { "type": "string", "example": "1" },
+        "ia_year":       { "type": "integer", "example": 2025 },
+        "ia_purpose": {
+          "type": ["string", "null"],
+          "description": "Purpose text in parentheses below the IA line — e.g. 'CONDONATION OF DELAY IN FILING THE COUNTER AFFIDAVIT', 'RECEIVING ADDITIONAL DOCUMENTS', 'STAY'",
+          "example": "CONDONATION OF DELAY IN FILING THE COUNTER AFFIDAVIT"
+        },
+        "ia_status": {
+          "type": ["string", "null"],
+          "description": "Status of this specific IA if noted separately — 'PENDING', 'ALLOWED', 'DISMISSED'",
+          "example": "PENDING"
+        },
+        "ia_advocates": {
+          "type": "array",
+          "description": "Advocates specific to this IA when listed separately from main case advocates — rare",
+          "items": { "$ref": "#/definitions/AdvocateEntry" }
+        }
+      }
+    },
+
+    "LinkedCase": {
+      "description": "A case cross-referenced via WITH, IN, or CROSS_OBJECTION keywords.",
+      "type": "object",
+      "required": ["case_number_raw", "link_type"],
+      "properties": {
+        "link_type": {
+          "type": "string",
+          "description": "WITH = clubbed for joint hearing. IN = this case was filed within the referenced case. CROSS_OBJECTION = cross-objection.",
+          "enum": ["WITH", "IN", "CROSS_OBJECTION", "OTHER"]
+        },
+        "case_number_raw":        { "type": "string", "example": "WP(C) 29169/ 2024" },
+        "case_type":              { "type": "string", "example": "WP(C)" },
+        "case_number":            { "type": "string", "example": "29169" },
+        "case_year":              { "type": "integer", "example": 2024 },
+        "linked_case_petitioner": {
+          "type": ["string", "null"],
+          "description": "Petitioner name of linked case when printed inline — common in SEPARATE_LIST sub-items",
+          "example": "PRADEEP KUMAR"
+        },
+        "linked_case_advocates": {
+          "type": "array",
+          "description": "Advocates listed specifically for this linked case when different from parent case advocates — common in SEPARATE_LIST bundles",
+          "items": { "$ref": "#/definitions/AdvocateEntry" }
+        }
+      }
+    }
+
+  }
+}
