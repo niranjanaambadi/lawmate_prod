@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Scheduled Lambda that triggers Lawmate cause-list sync every 2 hours.
+
+Parameters:
+  CauseListSyncUrl:
+    Type: String
+    Description: Full URL for backend cause-list sync endpoint (POST /api/v1/causelist/sync).
+  CauseListSyncSource:
+    Type: String
+    Default: "daily"
+    Description: daily|weekly|advanced|monthly|all
+  CauseListSyncBearerToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional bearer token if your backend endpoint is protected.
+  CauseListSyncApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional x-api-key header for backend protection.
+
+Resources:
+  CauseListSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lawmate-causelist-sync
+      CodeUri: ./
+      Handler: handler.handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 120
+      Environment:
+        Variables:
+          CAUSELIST_SYNC_URL: !Ref CauseListSyncUrl
+          CAUSELIST_SYNC_SOURCE: !Ref CauseListSyncSource
+          CAUSELIST_SYNC_MAX_TABS: "8"
+          CAUSELIST_SYNC_BEARER_TOKEN: !Ref CauseListSyncBearerToken
+          CAUSELIST_SYNC_API_KEY: !Ref CauseListSyncApiKey
+          CAUSELIST_SYNC_TIMEOUT_SECONDS: "45"
+      Events:
+        EveryTwoHours:
+          Type: Schedule
+          Properties:
+            Schedule: rate(2 hours)
+            Name: lawmate-causelist-sync-2h
+            Description: Trigger cause-list sync every 2 hours.
+            Enabled: true
+
+Outputs:
+  CauseListSyncFunctionArn:
+    Description: ARN for the scheduled cause-list sync function.
+    Value: !GetAtt CauseListSyncFunction.Arn
