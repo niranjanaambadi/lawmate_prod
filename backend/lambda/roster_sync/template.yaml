@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Scheduled Lambda that triggers Lawmate roster sync every 30 minutes.
+
+Parameters:
+  RosterSyncUrl:
+    Type: String
+    Description: Full URL for backend sync API endpoint (POST /api/v1/roster/sync).
+  RosterSyncBearerToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional bearer token if your backend endpoint is protected.
+  RosterSyncApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional x-api-key header for backend protection.
+
+Resources:
+  RosterSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lawmate-roster-sync
+      CodeUri: ./
+      Handler: handler.handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          ROSTER_SYNC_URL: !Ref RosterSyncUrl
+          ROSTER_SYNC_BEARER_TOKEN: !Ref RosterSyncBearerToken
+          ROSTER_SYNC_API_KEY: !Ref RosterSyncApiKey
+          ROSTER_SYNC_TIMEOUT_SECONDS: "30"
+      Events:
+        EveryThirtyMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Name: lawmate-roster-sync-30m
+            Description: Trigger roster sync every 30 minutes.
+            Enabled: true
+
+Outputs:
+  RosterSyncFunctionArn:
+    Description: ARN for the scheduled roster sync function.
+    Value: !GetAtt RosterSyncFunction.Arn
