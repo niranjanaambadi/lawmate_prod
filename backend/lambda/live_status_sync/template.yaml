@@ -1,0 +1,47 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Scheduled Lambda that triggers Lawmate live-status worker every 15 minutes.
+
+Parameters:
+  LiveStatusWorkerUrl:
+    Type: String
+    Description: Full URL for backend live-status worker endpoint (POST /api/v1/live-status-worker/run-due).
+  LiveStatusWorkerToken:
+    Type: String
+    NoEcho: true
+    Description: x-mcp-token value configured as MCP_WORKER_TOKEN in backend.
+  LiveStatusBatchSize:
+    Type: Number
+    Default: 50
+    Description: Number of due cases to process per run.
+
+Resources:
+  LiveStatusSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lawmate-live-status-sync
+      CodeUri: ./
+      Handler: handler.handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 120
+      Environment:
+        Variables:
+          LIVE_STATUS_WORKER_URL: !Ref LiveStatusWorkerUrl
+          LIVE_STATUS_WORKER_TOKEN: !Ref LiveStatusWorkerToken
+          LIVE_STATUS_BATCH_SIZE: !Ref LiveStatusBatchSize
+          LIVE_STATUS_TIMEOUT_SECONDS: "45"
+      Events:
+        Every15Minutes:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Name: lawmate-live-status-sync-15m
+            Description: Trigger live-status due checks every 15 minutes.
+            Enabled: true
+
+Outputs:
+  LiveStatusSyncFunctionArn:
+    Description: ARN for the scheduled live-status sync function.
+    Value: !GetAtt LiveStatusSyncFunction.Arn
+
