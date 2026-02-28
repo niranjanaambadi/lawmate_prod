@@ -1,0 +1,10 @@
+{
+  "devDependencies": {
+    "prisma": "^7.3.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.991.0",
+    "@prisma/client": "^7.3.0",
+    "playwright": "^1.58.2"
+  }
+}
