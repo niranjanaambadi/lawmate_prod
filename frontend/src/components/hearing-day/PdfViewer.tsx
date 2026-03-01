@@ -1,5 +1,7 @@
 "use client";
 
+import "@react-pdf-viewer/core/lib/styles/index.css";
+import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { SpecialZoomLevel, Viewer, Worker } from "@react-pdf-viewer/core";
 import { pageNavigationPlugin } from "@react-pdf-viewer/page-navigation";
