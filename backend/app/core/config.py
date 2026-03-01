@@ -179,16 +179,7 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore"  # KEY FIX: Ignore extra fields in .env
     )
-    
-    @property
-    def cors_origins_list(self) -> List[str]:
-        """Parse CORS origins from string to list"""
-        try:
-            if isinstance(self.CORS_ORIGINS, str):
-                return json.loads(self.CORS_ORIGINS)
-            return self.CORS_ORIGINS
-        except:
-            return ["http://localhost:3000"]
+   
 
     @property
     def tavily_allowed_domains_list(self) -> List[str]:
