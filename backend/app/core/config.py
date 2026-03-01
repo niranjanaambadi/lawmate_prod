@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     
     # Application
     APP_NAME: str = "Lawmate"
-    DEBUG: bool = True
+    DEBUG: bool = False
     
     # Database
     DATABASE_URL: str
