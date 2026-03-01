@@ -19,7 +19,18 @@ from app.db.models import Case, CauseListIngestionRun, CauseListSource
 from app.services.cause_list_store import cause_list_store
 from app.services.daily_pdf_fetch_service import daily_pdf_fetch_service
 from jobs.daily_cause_list_job import run_daily_cause_list_job
+from app.core.config import settings
 
+# Add at the top of main.py
+if not settings.DEBUG:
+    # Disable docs in production
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version="1.0.0",
+        docs_url=None,      # Disable Swagger UI
+        redoc_url=None,     # Disable ReDoc
+        openapi_url=None,   # Disable OpenAPI schema
+    )
 # ── New ───────────────────────────────────────────────────────────────────────
 try:
     from app.api.v1.endpoints.agent import router as agent_router
