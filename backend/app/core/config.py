@@ -120,9 +120,9 @@ class Settings(BaseSettings):
     DYNAMODB_TABLE_NAME: str = "lawmate-activity-trail"
     
     # CORS
-    CORS_ORIGINS: str = '["https://lawmate-prod.vercel.app","https://lawmate-prod.vercel.app/signin","chrome-extension://*", "http://localhost:3000"]'
-    # Regex to allow all Vercel preview deployments for this project (e.g. lawmate-prod-xxxx.vercel.app)
-    CORS_ORIGIN_REGEX: str = r"https://lawmate-prod[^.]*\.vercel\.app"
+    CORS_ORIGINS: str = '["https://lawmate-prod.vercel.app","http://localhost:3000"]'
+    # Matches all Vercel preview deployments (lawmate-prod-xxxx.vercel.app) and chrome extensions
+    CORS_ORIGIN_REGEX: str = r"https://lawmate-prod[^.]*\.vercel\.app|chrome-extension://.*"
 
     @property
     def cors_origins_list(self) -> List[str]:
