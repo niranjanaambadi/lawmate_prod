@@ -68,7 +68,7 @@ except Exception as _mw_err:
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=process.env.CORS_ORIGIN,
+    allow_origins=process.env.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
