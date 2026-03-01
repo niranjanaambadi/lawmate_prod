@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     DYNAMODB_TABLE_NAME: str = "lawmate-activity-trail"
     
     # CORS
-    CORS_ORIGINS: str = '["https://lawmate-prod.vercel.app","chrome-extension://*", "http://localhost:3000"]'
+    CORS_ORIGINS: str = '["https://lawmate-prod.vercel.app","https://lawmate-prod.vercel.app/signin","chrome-extension://*", "http://localhost:3000"]'
 
     @property
     def cors_origins_list(self) -> List[str]:
