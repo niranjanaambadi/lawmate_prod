@@ -122,6 +122,15 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str = '["http://localhost:3000"]'
 
+    @property
+    def cors_origins_list(self):
+        raw = (self.CORS_ORIGINS or "").strip()
+        if not raw:
+            return ["http://localhost:3000"]
+        if raw.startswith("["):
+            return [x.strip() for x in json.loads(raw) if str(x).strip()]
+        return [x.strip() for x in raw.split(",") if x.strip()]
+
     # Legal translation
     LEGAL_TRANSLATE_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
     LEGAL_TRANSLATE_MAX_TOKENS: int = 4096
