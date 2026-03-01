@@ -20,49 +20,7 @@ router = APIRouter()
 RESET_TOKEN_EXPIRY_HOURS = 1
 PROFILE_OTP_EXPIRY_MINUTES = 5
 
-# @router.post("/register", response_model=schemas.UserOut)
-# def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-#     """Register new user"""
-#     # Check if user exists
-#     existing_user = db.query(models.User).filter(
-#         models.User.email == user.email
-#     ).first()
-    
-#     if existing_user:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Email already registered"
-#         )
-    
-#     # Check KHC ID
-#     existing_khc = db.query(models.User).filter(
-#         models.User.khc_advocate_id == user.khc_advocate_id
-#     ).first()
-    
-#     if existing_khc:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="KHC Advocate ID already registered"
-#         )
-    
-#     # Create user
-#     db_user = models.User(
-#         email=user.email,
-#         password_hash=get_password_hash(user.password),
-#         khc_advocate_id=user.khc_advocate_id,
-#         khc_advocate_name=user.khc_advocate_name,
-#         mobile=user.mobile,
-#         khc_enrollment_number=user.khc_enrollment_number,
-#         role="advocate",
-#         is_active=True,
-#         is_verified=False
-#     )
-    
-#     db.add(db_user)
-#     db.commit()
-#     db.refresh(db_user)
-    
-#     return db_user
+
 
 @router.post("/login")
 def login(form_data: schemas.UserLogin, db: Session = Depends(get_db)):
