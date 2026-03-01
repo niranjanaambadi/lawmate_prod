@@ -123,13 +123,25 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = '["https://lawmate-prod.vercel.app","chrome-extension://*", "http://localhost:3000"]'
 
     @property
-    def cors_origins_list(self):
+    def cors_origins_list(self) -> List[str]:
+        """Parse CORS origins from JSON string to list"""
         raw = (self.CORS_ORIGINS or "").strip()
+    
+        # If empty, return localhost for dev
         if not raw:
             return ["http://localhost:3000"]
-        if raw.startswith("["):
-            return [x.strip() for x in json.loads(raw) if str(x).strip()]
-        return [x.strip() for x in raw.split(",") if x.strip()]
+    
+        try:
+            # If it's a JSON array string
+            if raw.startswith("["):
+                parsed = json.loads(raw)
+                return [str(x).strip() for x in parsed if str(x).strip()]
+        
+            # If it's a comma-separated string
+            return [x.strip() for x in raw.split(",") if x.strip()]
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse CORS_ORIGINS: {raw}")
+            return ["http://localhost:3000"]
 
     # Legal translation
     LEGAL_TRANSLATE_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
