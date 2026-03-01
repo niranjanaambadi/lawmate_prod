@@ -2,8 +2,12 @@
 
 export const CONFIG = {
   // API Configuration
-  API_BASE_URL: 'http://127.0.0.1:8000',
-  WEB_BASE_URL: 'http://localhost:3000',
+  //local-host
+  // API_BASE_URL: 'http://127.0.0.1:8000',
+  // WEB_BASE_URL: 'http://localhost:3000',
+  //Production
+  API_BASE_URL='https://lawmateprod-production.up.railway.app',
+  WEB_BASE_URL='https://lawmate-prod-b4wjaf4uh-niranjanas-projects-6ce82f55.vercel.app',
   API_VERSION: 'v1',
   API_TIMEOUT: 30000, // 30 seconds
   
