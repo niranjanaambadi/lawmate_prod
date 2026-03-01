@@ -5,8 +5,11 @@ Application configuration using Pydantic Settings
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 import json
+import logging
 from pydantic import field_validator
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
