@@ -2,7 +2,8 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,7 +66,7 @@ function formatDateShort(value: string | null | undefined): string {
 function tomorrowIST(): string {
   const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   now.setDate(now.getDate() + 1);
-  return now.toISOString().slice(0, 10); // YYYY-MM-DD
+  return now.toISOString().slice(0, 10);
 }
 
 function formatDisplayDate(iso: string): string {
@@ -76,117 +77,101 @@ function formatDisplayDate(iso: string): string {
 
 export default function DashboardPage() {
   const { user, token } = useAuth();
+  const queryClient = useQueryClient();
   const apiBase = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
-  const [rosterSubtitle, setRosterSubtitle] = useState("Loading latest roster...");
-  const [todayAtCourt, setTodayAtCourt] = useState<CauseListDayGroup | null>(null);
-  const [pendingRows, setPendingRows] = useState<PendingCaseStatusRow[]>([]);
-  const [trackedStatusRows, setTrackedStatusRows] = useState<TrackedCaseStatusRow[]>([]);
-  const [refreshAllLoading, setRefreshAllLoading] = useState(false);
-  const [refreshAllSummary, setRefreshAllSummary] = useState<{ refreshed: number; failed: number; skipped: number } | null>(null);
-  const [rowRefreshingId, setRowRefreshingId] = useState<string | null>(null);
 
-  // Advocate cause list state
-  const [causeList, setCauseList] = useState<AdvocateCauseListResponse | null>(null);
-  const [causeListLoading, setCauseListLoading] = useState(false);
-  const [causeListRefreshing, setCauseListRefreshing] = useState(false);
-  const [causeListError, setCauseListError] = useState<string | null>(null);
+  // ── UI-only state ──────────────────────────────────────────────────────────
   const [clockNow, setClockNow] = useState(new Date());
-  const [reminders, setReminders] = useState<DashboardReminder[]>([]);
-  const [remindersLoading, setRemindersLoading] = useState(false);
-  const [remindersError, setRemindersError] = useState<string | null>(null);
+  const [refreshAllSummary, setRefreshAllSummary] = useState<{
+    refreshed: number;
+    failed: number;
+    skipped: number;
+  } | null>(null);
   const [newReminderTitle, setNewReminderTitle] = useState("");
   const [newReminderDate, setNewReminderDate] = useState(new Date().toISOString().slice(0, 10));
-  const [addingReminder, setAddingReminder] = useState(false);
-  const [completingReminderId, setCompletingReminderId] = useState<string | null>(null);
   const [showReminderForm, setShowReminderForm] = useState(false);
 
-  useEffect(() => {
-    let ignore = false;
-    const loadRosterSummary = async () => {
-      try {
-        const res = await fetch("/api/kerala-high-court/roster", { cache: "no-store" });
-        const body = (await res.json()) as DashboardRosterData;
-        if (ignore) return;
-        setRosterSubtitle(formatRosterDate(body.latest?.parsedDate));
-      } catch {
-        if (!ignore) setRosterSubtitle("Open latest available roster");
-      }
-    };
-    void loadRosterSummary();
-    return () => { ignore = true; };
+  // Stable date range for reminders (computed once at mount)
+  const reminderDateFrom = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const reminderDateTo = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
   }, []);
+  const causeListDate = useMemo(() => tomorrowIST(), []);
 
-  useEffect(() => {
-    let ignore = false;
-    const loadTodayAtCourt = async () => {
-      if (!token) return;
-      try {
-        const data = await getTodayAtCourt(token);
-        if (ignore) return;
-        setTodayAtCourt(data.days[0] || null);
-      } catch {
-        if (!ignore) setTodayAtCourt(null);
-      }
-    };
-    void loadTodayAtCourt();
-    return () => { ignore = true; };
-  }, [token]);
-
+  // Clock ticker
   useEffect(() => {
     const timer = setInterval(() => setClockNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const loadReminders = async () => {
-    if (!token) return;
-    setRemindersLoading(true);
-    setRemindersError(null);
-    try {
-      const today = new Date();
-      const dateFrom = today.toISOString().slice(0, 10);
-      const dateToDate = new Date(today);
-      dateToDate.setDate(dateToDate.getDate() + 30);
-      const dateTo = dateToDate.toISOString().slice(0, 10);
+  // ── Queries ────────────────────────────────────────────────────────────────
+  const rosterQuery = useQuery({
+    queryKey: ["rosterSummary"],
+    queryFn: async () => {
+      const res = await fetch("/api/kerala-high-court/roster", { cache: "no-store" });
+      return res.json() as Promise<DashboardRosterData>;
+    },
+    staleTime: 10 * 60 * 1000,
+  });
 
+  const todayAtCourtQuery = useQuery({
+    queryKey: ["todayAtCourt", token],
+    queryFn: () => getTodayAtCourt(token!),
+    enabled: !!token,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const pendingQuery = useQuery({
+    queryKey: ["pendingStatuses", token],
+    queryFn: () => getPendingCaseStatuses(token!),
+    enabled: !!token,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const trackedQuery = useQuery({
+    queryKey: ["trackedStatuses", token],
+    queryFn: () => getTrackedCaseStatuses(token!),
+    enabled: !!token,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const remindersQuery = useQuery({
+    queryKey: ["reminders", token, reminderDateFrom, reminderDateTo],
+    queryFn: async () => {
       const res = await fetch(
-        `${apiBase}/api/v1/calendar/events?date_from=${dateFrom}&date_to=${dateTo}&event_type=reminder`,
+        `${apiBase}/api/v1/calendar/events?date_from=${reminderDateFrom}&date_to=${reminderDateTo}&event_type=reminder`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { detail?: string }).detail || "Failed to load reminders");
       }
-
       const data = (await res.json()) as DashboardReminder[];
-      const nextItems = Array.isArray(data) ? data : [];
-      setReminders(
-        nextItems.sort(
-          (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
-        )
+      const items = Array.isArray(data) ? data : [];
+      return items.sort(
+        (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
       );
-    } catch (err: unknown) {
-      setReminders([]);
-      setRemindersError(err instanceof Error ? err.message : "Failed to load reminders");
-    } finally {
-      setRemindersLoading(false);
-    }
-  };
+    },
+    enabled: !!token,
+    staleTime: 2 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    void loadReminders();
-  }, [token]);
+  const causeListQuery = useQuery<AdvocateCauseListResponse>({
+    queryKey: ["causeList", token, causeListDate],
+    queryFn: () => getAdvocateCauseList(token!, causeListDate),
+    enabled: !!token,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
 
-  const addReminder = async () => {
-    if (!token || !newReminderTitle.trim() || !newReminderDate || addingReminder) return;
-    setAddingReminder(true);
-    setRemindersError(null);
-    try {
+  // ── Mutations ──────────────────────────────────────────────────────────────
+  const addReminderMutation = useMutation({
+    mutationFn: async () => {
       const res = await fetch(`${apiBase}/api/v1/calendar/events`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           title: newReminderTitle.trim(),
           event_type: "reminder",
@@ -194,32 +179,23 @@ export default function DashboardPage() {
           all_day: true,
         }),
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { detail?: string }).detail || "Could not add reminder");
       }
-
-      const created = (await res.json()) as DashboardReminder;
-      setReminders((prev) =>
-        [...prev, created].sort(
-          (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
-        )
-      );
+      return res.json() as Promise<DashboardReminder>;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["reminders", token, reminderDateFrom, reminderDateTo],
+      });
       setNewReminderTitle("");
       setShowReminderForm(false);
-    } catch (err: unknown) {
-      setRemindersError(err instanceof Error ? err.message : "Could not add reminder");
-    } finally {
-      setAddingReminder(false);
-    }
-  };
+    },
+  });
 
-  const completeReminder = async (eventId: string) => {
-    if (!token || completingReminderId) return;
-    setCompletingReminderId(eventId);
-    setRemindersError(null);
-    try {
+  const completeReminderMutation = useMutation({
+    mutationFn: async (eventId: string) => {
       const res = await fetch(`${apiBase}/api/v1/calendar/events/${eventId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
@@ -228,119 +204,106 @@ export default function DashboardPage() {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { detail?: string }).detail || "Could not complete reminder");
       }
-      setReminders((prev) => prev.filter((item) => item.event_id !== eventId));
-    } catch (err: unknown) {
-      setRemindersError(err instanceof Error ? err.message : "Could not complete reminder");
-    } finally {
-      setCompletingReminderId(null);
-    }
-  };
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["reminders", token, reminderDateFrom, reminderDateTo],
+      });
+    },
+  });
 
-  useEffect(() => {
-    let ignore = false;
-    const loadTrackedStatus = async () => {
-      if (!token) return;
-      try {
-        const rows = await getTrackedCaseStatuses(token);
-        if (!ignore) setTrackedStatusRows(rows);
-      } catch {
-        if (!ignore) setTrackedStatusRows([]);
-      }
-    };
-    void loadTrackedStatus();
-    return () => { ignore = true; };
-  }, [token]);
+  const refreshCauseListMutation = useMutation({
+    mutationFn: () => refreshAdvocateCauseList(token!, causeListDate),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["causeList", token, causeListDate], data);
+    },
+  });
 
-  const reloadPendingRows = async () => {
-    if (!token) return;
-    try {
-      const rows = await getPendingCaseStatuses(token);
-      setPendingRows(rows);
-    } catch {
-      setPendingRows([]);
-    }
-  };
-
-  useEffect(() => {
-    let ignore = false;
-    const loadPending = async () => {
-      if (!token) return;
-      try {
-        const rows = await getPendingCaseStatuses(token);
-        if (!ignore) setPendingRows(rows);
-      } catch {
-        if (!ignore) setPendingRows([]);
-      }
-    };
-    void loadPending();
-    return () => { ignore = true; };
-  }, [token]);
-
-  const handleRefreshAll = async () => {
-    if (!token || refreshAllLoading) return;
-    setRefreshAllLoading(true);
-    setRefreshAllSummary(null);
-    try {
-      const result = await refreshAllPendingStatuses(token);
-      setRefreshAllSummary({ refreshed: result.refreshed, failed: result.failed, skipped: result.skipped });
-      await reloadPendingRows();
-    } catch {
+  const refreshAllMutation = useMutation({
+    mutationFn: () => refreshAllPendingStatuses(token!),
+    onSuccess: (result) => {
+      setRefreshAllSummary({
+        refreshed: result.refreshed,
+        failed: result.failed,
+        skipped: result.skipped,
+      });
+      void queryClient.invalidateQueries({ queryKey: ["pendingStatuses", token] });
+    },
+    onError: () => {
       setRefreshAllSummary({ refreshed: 0, failed: pendingRows.length, skipped: 0 });
-    } finally {
-      setRefreshAllLoading(false);
-    }
+    },
+  });
+
+  const refreshOneRowMutation = useMutation({
+    mutationFn: (caseId: string) => refreshOnePendingStatus(token!, caseId),
+    onSuccess: (_, caseId) => {
+      void queryClient.invalidateQueries({ queryKey: ["pendingStatuses", token] });
+      void queryClient.invalidateQueries({ queryKey: ["case", caseId, token] });
+    },
+  });
+
+  // ── Derived values (variable-named to match original JSX) ──────────────────
+  const rosterSubtitle = rosterQuery.isError
+    ? "Open latest available roster"
+    : rosterQuery.data
+    ? formatRosterDate(rosterQuery.data.latest?.parsedDate)
+    : "Loading latest roster...";
+
+  const todayAtCourt: CauseListDayGroup | null = todayAtCourtQuery.data?.days[0] ?? null;
+  const pendingRows: PendingCaseStatusRow[] = pendingQuery.data ?? [];
+  const trackedStatusRows: TrackedCaseStatusRow[] = trackedQuery.data ?? [];
+  const reminders: DashboardReminder[] = remindersQuery.data ?? [];
+  const remindersLoading = remindersQuery.isLoading;
+  const causeList: AdvocateCauseListResponse | null = causeListQuery.data ?? null;
+  const causeListLoading = causeListQuery.isLoading;
+
+  const refreshAllLoading = refreshAllMutation.isPending;
+  const causeListRefreshing = refreshCauseListMutation.isPending;
+  const addingReminder = addReminderMutation.isPending;
+  const completingReminderId = completeReminderMutation.isPending
+    ? (completeReminderMutation.variables as string)
+    : null;
+  const rowRefreshingId = refreshOneRowMutation.isPending
+    ? (refreshOneRowMutation.variables as string)
+    : null;
+
+  const causeListError: string | null = (() => {
+    const err = causeListQuery.error ?? refreshCauseListMutation.error;
+    if (!err) return null;
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg.includes("KHC") ? null : msg;
+  })();
+
+  const remindersError: string | null = (() => {
+    const err =
+      remindersQuery.error ?? addReminderMutation.error ?? completeReminderMutation.error;
+    return err instanceof Error ? err.message : err ? String(err) : null;
+  })();
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+  const addReminder = () => {
+    if (!token || !newReminderTitle.trim() || !newReminderDate || addingReminder) return;
+    addReminderMutation.mutate();
   };
 
-  const handleRefreshOneRow = async (caseId: string) => {
-    if (!token || rowRefreshingId) return;
-    setRowRefreshingId(caseId);
-    try {
-      await refreshOnePendingStatus(token, caseId);
-      await reloadPendingRows();
-    } catch {
-      // row stays with stale data; silent failure is acceptable here
-    } finally {
-      setRowRefreshingId(null);
-    }
+  const completeReminder = (eventId: string) => {
+    if (!token || completeReminderMutation.isPending) return;
+    completeReminderMutation.mutate(eventId);
   };
 
-  // Load advocate cause list (tomorrow by default)
-  useEffect(() => {
-    let ignore = false;
-    const load = async () => {
-      if (!token) return;
-      setCauseListLoading(true);
-      setCauseListError(null);
-      try {
-        const data = await getAdvocateCauseList(token, tomorrowIST());
-        if (!ignore) setCauseList(data);
-      } catch (err: unknown) {
-        if (!ignore) {
-          const msg = err instanceof Error ? err.message : "Could not load cause list";
-          // 422 means profile not set up — don't show as error
-          if (!msg.includes("KHC")) setCauseListError(msg);
-        }
-      } finally {
-        if (!ignore) setCauseListLoading(false);
-      }
-    };
-    void load();
-    return () => { ignore = true; };
-  }, [token]);
-
-  const handleRefreshCauseList = async () => {
+  const handleRefreshCauseList = () => {
     if (!token || causeListRefreshing) return;
-    setCauseListRefreshing(true);
-    setCauseListError(null);
-    try {
-      const data = await refreshAdvocateCauseList(token, tomorrowIST());
-      setCauseList(data);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Refresh failed";
-      setCauseListError(msg);
-    } finally {
-      setCauseListRefreshing(false);
-    }
+    refreshCauseListMutation.mutate();
+  };
+
+  const handleRefreshAll = () => {
+    if (!token || refreshAllLoading) return;
+    refreshAllMutation.mutate();
+  };
+
+  const handleRefreshOneRow = (caseId: string) => {
+    if (!token || refreshOneRowMutation.isPending) return;
+    refreshOneRowMutation.mutate(caseId);
   };
 
   return (

@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
@@ -44,16 +45,11 @@ function SortIcon({ field, sortBy, sortDir }: { field: string; sortBy: string; s
 export default function CasesPage() {
   const { token } = useAuth();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
 
-  const [rows, setRows] = useState<CaseListItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(Number(searchParams.get("page") || "1"));
   const [perPage] = useState(20);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [deletingCaseId, setDeletingCaseId] = useState<string | null>(null);
-
   const [qInput, setQInput] = useState(searchParams.get("q") || "");
   const [status, setStatus] = useState(searchParams.get("status") || "all");
   const [partyRole, setPartyRole] = useState(searchParams.get("party_role") || "all");
@@ -61,8 +57,6 @@ export default function CasesPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">(
     (searchParams.get("sort_dir") as "asc" | "desc") || "desc"
   );
-
-  const totalPages = Math.max(1, Math.ceil(total / perPage));
 
   const queryString = useMemo(() => {
     const q = new URLSearchParams();
@@ -79,42 +73,39 @@ export default function CasesPage() {
     router.replace(`/dashboard/cases?${queryString}`);
   }, [queryString, router]);
 
-  useEffect(() => {
-    if (!token) return;
+  const { data, isLoading: loading, error } = useQuery({
+    queryKey: ["cases", token, page, perPage, qInput, status, partyRole, sortBy, sortDir],
+    queryFn: () =>
+      listCases(
+        {
+          page,
+          perPage,
+          q: qInput.trim() || undefined,
+          status: status === "all" ? undefined : status,
+          partyRole: partyRole === "all" ? undefined : partyRole,
+          sortBy,
+          sortDir,
+        },
+        token!
+      ),
+    enabled: !!token,
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+  });
 
-    let ignore = false;
-    setLoading(true);
-    setError(null);
+  const rows: CaseListItem[] = data?.items ?? [];
+  const total: number = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
 
-    listCases(
-      {
-        page,
-        perPage,
-        q: qInput.trim() || undefined,
-        status: status === "all" ? undefined : status,
-        partyRole: partyRole === "all" ? undefined : partyRole,
-        sortBy,
-        sortDir,
-      },
-      token
-    )
-      .then((res) => {
-        if (ignore) return;
-        setRows(res.items || []);
-        setTotal(res.total || 0);
-      })
-      .catch((e) => {
-        if (ignore) return;
-        setError(e instanceof Error ? e.message : "Failed to load cases");
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [token, page, perPage, qInput, status, partyRole, sortBy, sortDir]);
+  const deleteMutation = useMutation({
+    mutationFn: (caseId: string) => deleteCase(caseId, token!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["cases"] });
+    },
+    onError: (e) => {
+      alert(e instanceof Error ? e.message : "Failed to delete case");
+    },
+  });
 
   const onApplyFilters = () => {
     setPage(1);
@@ -129,27 +120,19 @@ export default function CasesPage() {
     setSortDir("asc");
   };
 
-  const onDeleteCase = async (caseId: string, caseLabel: string) => {
+  const onDeleteCase = (caseId: string, caseLabel: string) => {
     if (!token) return;
     const confirmed = window.confirm(
       `Delete case ${caseLabel}? This will remove it from your cases list.`
     );
     if (!confirmed) return;
-
-    try {
-      setDeletingCaseId(caseId);
-      await deleteCase(caseId, token);
-      setRows((prev) => prev.filter((row) => row.id !== caseId));
-      setTotal((prev) => Math.max(0, prev - 1));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete case");
-    } finally {
-      setDeletingCaseId(null);
-    }
+    deleteMutation.mutate(caseId);
   };
 
   const selectClass =
     "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none";
+
+  const errorMsg = error instanceof Error ? error.message : error ? "Failed to load cases" : null;
 
   return (
     <div className="space-y-6">
@@ -262,14 +245,14 @@ export default function CasesPage() {
                     </td>
                   </tr>
                 )}
-                {!loading && error && (
+                {!loading && errorMsg && (
                   <tr>
                     <td className="px-4 py-8 text-center text-rose-600" colSpan={8}>
-                      {error}
+                      {errorMsg}
                     </td>
                   </tr>
                 )}
-                {!loading && !error && rows.length === 0 && (
+                {!loading && !errorMsg && rows.length === 0 && (
                   <tr>
                     <td className="px-4 py-8 text-center text-slate-400" colSpan={8}>
                       No cases found.
@@ -277,7 +260,7 @@ export default function CasesPage() {
                   </tr>
                 )}
                 {!loading &&
-                  !error &&
+                  !errorMsg &&
                   rows.map((c) => (
                     <tr key={c.id} className="transition-colors hover:bg-slate-50">
                       <td className="px-4 py-3">
@@ -314,7 +297,7 @@ export default function CasesPage() {
                         <button
                           type="button"
                           onClick={() => onDeleteCase(c.id, c.case_number || c.efiling_number)}
-                          disabled={deletingCaseId === c.id}
+                          disabled={deleteMutation.isPending && deleteMutation.variables === c.id}
                           className="inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                           title="Delete case"
                           aria-label="Delete case"
