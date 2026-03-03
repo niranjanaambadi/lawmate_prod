@@ -98,7 +98,8 @@ export default function CaseDetailPage() {
   const { token } = useAuth();
   const [data, setData] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [hearingNote, setHearingNote] = useState<HearingNoteResponse | null>(null);
   const [latestCourtData, setLatestCourtData] = useState<CaseStatusLookupResult | null>(null);
@@ -130,11 +131,11 @@ export default function CaseDetailPage() {
     if (!token || !caseId) return;
     let ignore = false;
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     loadAll()
       .catch((e) => {
         if (ignore) return;
-        setError(e instanceof Error ? e.message : "Failed to load case");
+        setLoadError(e instanceof Error ? e.message : "Failed to load case");
       })
       .finally(() => {
         if (!ignore) setLoading(false);
@@ -149,10 +150,11 @@ export default function CaseDetailPage() {
     if (!token) return;
     try {
       setOpeningDocId(doc.id);
+      setActionError(null);
       const { url } = await getDocumentViewUrl(doc.id, token, 1800);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to open document");
+      setActionError(e instanceof Error ? e.message : "Failed to open document");
     } finally {
       setOpeningDocId(null);
     }
@@ -178,16 +180,16 @@ export default function CaseDetailPage() {
     if (!token || !caseId) return;
     try {
       setRefreshing(true);
-      setError(null);
+      setActionError(null);
       const live: CaseStatusLookupResult = await refreshCaseStatusForCase(caseId, token);
       if (!live.found) {
-        setError(live.message || "Case not found on court portal.");
+        setActionError(live.message || "Case not found on court portal.");
         return;
       }
       setLatestCourtData(live);
       await loadAll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to refresh case details");
+      setActionError(e instanceof Error ? e.message : "Failed to refresh case details");
     } finally {
       setRefreshing(false);
     }
@@ -215,7 +217,7 @@ export default function CaseDetailPage() {
   };
 
   if (loading) return <div className="text-slate-600">Loading case details...</div>;
-  if (error) return <div className="text-red-600">{error}</div>;
+  if (loadError) return <div className="text-red-600">{loadError}</div>;
   if (!data) return <div className="text-slate-600">Case not found.</div>;
   const displayHistory = (latestCourtData?.hearing_history || data.hearing_history || null) as Record<string, unknown>[] | null;
   const historyRows = Array.isArray(displayHistory) ? displayHistory : [];
@@ -272,6 +274,11 @@ export default function CaseDetailPage() {
 
   return (
     <div className="space-y-4">
+      {actionError && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {actionError}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{data.case_number || data.efiling_number}</h1>
         <div className="flex items-center gap-2">
