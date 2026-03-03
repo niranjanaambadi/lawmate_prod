@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from typing import Any, Dict, Optional, Tuple, List
@@ -76,7 +77,39 @@ class CourtApiService:
         self.view_url = (settings.COURT_PLAYWRIGHT_VIEW_URL or "").strip()
         self.delay_seconds = max(0.0, float(settings.CASE_SYNC_REQUEST_DELAY_SECONDS or 3.0))
         self.headless = bool(settings.PLAYWRIGHT_HEADLESS)
+        self.playwright_executable_path = (settings.PLAYWRIGHT_EXECUTABLE_PATH or "").strip() or None
+        self.playwright_launch_args = [
+            arg.strip()
+            for arg in str(settings.PLAYWRIGHT_LAUNCH_ARGS or "").split(",")
+            if arg.strip()
+        ]
         self._last_call_at = 0.0
+
+    def _launch_browser(self, p: Any) -> Any:
+        launch_kwargs: Dict[str, Any] = {"headless": self.headless}
+
+        if self.playwright_executable_path:
+            if not os.path.exists(self.playwright_executable_path):
+                raise RuntimeError(
+                    "PLAYWRIGHT_EXECUTABLE_PATH is set but does not exist: "
+                    f"{self.playwright_executable_path}"
+                )
+            launch_kwargs["executable_path"] = self.playwright_executable_path
+
+        if self.playwright_launch_args:
+            launch_kwargs["args"] = self.playwright_launch_args
+
+        try:
+            return p.chromium.launch(**launch_kwargs)
+        except Exception as exc:
+            message = str(exc)
+            if "Executable doesn't exist" in message:
+                raise RuntimeError(
+                    "Chromium executable for Playwright is missing in this runtime. "
+                    "Install browser binaries during deploy with `playwright install chromium`, "
+                    "or set PLAYWRIGHT_EXECUTABLE_PATH to an existing Chromium binary path."
+                ) from exc
+            raise
 
     def _throttle(self) -> None:
         if self.delay_seconds <= 0:
@@ -180,7 +213,7 @@ class CourtApiService:
         return response.text()
 
     def _fallback_fetch_status_page_content(self, p: Any) -> str:
-        browser = p.chromium.launch(headless=self.headless)
+        browser = self._launch_browser(p)
         try:
             page = browser.new_page(
                 user_agent=(
@@ -313,7 +346,7 @@ class CourtApiService:
         case_no: str,
         case_year: str,
     ) -> Optional[Dict[str, Any]]:
-        browser = p.chromium.launch(headless=self.headless)
+        browser = self._launch_browser(p)
         try:
             page = browser.new_page(
                 user_agent=(
@@ -475,7 +508,11 @@ class CourtApiService:
 
     def fetch_case_status(self, case_number: str) -> Optional[Dict[str, Any]]:
         if sync_playwright is None:
-            raise RuntimeError("Playwright is not installed. Install with: pip install playwright && playwright install chromium")
+            raise RuntimeError(
+                "Playwright Python package is not installed. "
+                "Install with `pip install playwright` and install the browser with "
+                "`playwright install chromium`."
+            )
         if not self.status_url or not self.search_url or not self.view_url:
             raise ValueError("Court Playwright URLs are not configured")
 

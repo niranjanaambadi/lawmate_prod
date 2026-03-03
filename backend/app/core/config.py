@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     COURT_PLAYWRIGHT_SEARCH_URL: str = "https://hckinfo.keralacourts.in/digicourt/index.php/Casedetailssearch/Stausbycaseno"
     COURT_PLAYWRIGHT_VIEW_URL: str = "https://hckinfo.keralacourts.in/digicourt/index.php/Casedetailssearch/Viewcasestatus"
     PLAYWRIGHT_HEADLESS: bool = True
+    PLAYWRIGHT_EXECUTABLE_PATH: str = ""
+    PLAYWRIGHT_LAUNCH_ARGS: str = "--no-sandbox,--disable-setuid-sandbox"
     CAPTCHA_ENABLED: bool = True
     TWOCAPTCHA_API_KEY: str = ""
 
