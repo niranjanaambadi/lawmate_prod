@@ -28,7 +28,7 @@ export const privacyPolicy: LegalDocument = {
         {
           heading: "1.1 Scope",
           body: [
-            "This Privacy Policy applies to all personal data and sensitive personal data or information ("SPDI") collected through the LawMate Platform from advocates enrolled with the Kerala High Court Bar Association.",
+            "This Privacy Policy applies to all personal data and sensitive personal data or information (\"SPDI\") collected through the LawMate Platform from advocates enrolled with the Kerala High Court Bar Association.",
           ],
         },
         {
