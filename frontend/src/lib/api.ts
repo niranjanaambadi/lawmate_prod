@@ -306,6 +306,7 @@ export interface PendingCaseStatusRow {
   source_url?: string | null;
   fetched_at: string;
   updated_at: string;
+  last_synced_at?: string | null;
   // Latest hearing history row fields
   business_date?: string | null;
   tentative_date?: string | null;
@@ -316,6 +317,34 @@ export interface PendingCaseStatusRow {
 
 export async function getPendingCaseStatuses(token: string | null): Promise<PendingCaseStatusRow[]> {
   return apiRequest<PendingCaseStatusRow[]>("/api/v1/cases/pending-status", { token });
+}
+
+export interface RefreshAllStatusItem {
+  id: string;
+  case_number: string;
+  status: "ok" | "failed" | "skipped";
+  error?: string | null;
+}
+
+export interface RefreshAllStatusResult {
+  refreshed: number;
+  failed: number;
+  skipped: number;
+  results: RefreshAllStatusItem[];
+}
+
+export async function refreshAllPendingStatuses(token: string): Promise<RefreshAllStatusResult> {
+  return apiRequest<RefreshAllStatusResult>("/api/v1/cases/pending-status/refresh-all", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function refreshOnePendingStatus(token: string, caseId: string): Promise<void> {
+  await apiRequest(`/api/v1/cases/${caseId}/case-status/refresh`, {
+    method: "POST",
+    token,
+  });
 }
 
 export interface TrackedCaseStatusRow {

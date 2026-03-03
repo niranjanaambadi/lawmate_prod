@@ -218,6 +218,7 @@ class PendingCaseStatusResponse(BaseModel):
     source_url: Optional[str] = None
     fetched_at: datetime
     updated_at: datetime
+    last_synced_at: Optional[datetime] = None
     # Latest hearing history row fields (from raw_court_data)
     business_date: Optional[str] = None
     tentative_date: Optional[str] = None
@@ -227,6 +228,20 @@ class PendingCaseStatusResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RefreshAllStatusItem(BaseModel):
+    id: str
+    case_number: str
+    status: str          # "ok" | "failed" | "skipped"
+    error: Optional[str] = None
+
+
+class RefreshAllStatusResponse(BaseModel):
+    refreshed: int
+    failed: int
+    skipped: int
+    results: List[RefreshAllStatusItem]
 
 
 class TrackedCaseStatusResponse(BaseModel):

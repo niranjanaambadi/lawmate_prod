@@ -24,7 +24,9 @@ from app.db.schemas import (
     CaseDetailResponse,
     DocumentResponse,
     CaseHistoryResponse,
-    AIAnalysisResponse
+    AIAnalysisResponse,
+    RefreshAllStatusResponse,
+    RefreshAllStatusItem,
 )
 from app.api.deps import get_current_user
 from app.services.case_sync_service import case_sync_service
@@ -281,6 +283,7 @@ def get_pending_status_rows(
             "source_url": c.khc_source_url,
             "fetched_at": c.last_synced_at or c.updated_at,
             "updated_at": c.updated_at,
+            "last_synced_at": c.last_synced_at,
             # Latest hearing row fields
             "business_date": _first_val(last_row, ["business_date", "posting_date", "listed_on", "date"]),
             "tentative_date": _first_val(last_row, ["next_date", "tentative_date", "next_hearing_date"]),
@@ -289,6 +292,100 @@ def get_pending_status_rows(
             "judge_name": _first_val(last_row, ["hon_judge_name", "judge_name", "judge", "bench", "coram"]),
         })
     return result
+
+
+@router.post("/pending-status/refresh-all", response_model=RefreshAllStatusResponse)
+def refresh_all_pending_statuses(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Sync every pending case for the current user against the KHC portal.
+
+    Returns a per-case result so the frontend can show a summary toast.
+    Cases whose case_number cannot be formatted for lookup are skipped.
+    """
+    pending_cases = (
+        db.query(Case)
+        .filter(
+            Case.advocate_id == current_user.id,
+            Case.is_visible == True,
+            Case.status == CaseStatus.pending,
+            Case.case_number.isnot(None),
+            Case.case_number != "",
+        )
+        .all()
+    )
+
+    results: list[RefreshAllStatusItem] = []
+    refreshed = failed = skipped = 0
+
+    for c in pending_cases:
+        case_number = _build_case_number_for_lookup(c)
+        if not case_number:
+            skipped += 1
+            results.append(RefreshAllStatusItem(
+                id=str(c.id),
+                case_number=c.case_number or "",
+                status="skipped",
+                error="Incomplete case details — need case type and year",
+            ))
+            continue
+
+        try:
+            result = case_sync_service.query_case_status(case_number)
+            if not result.get("found"):
+                failed += 1
+                results.append(RefreshAllStatusItem(
+                    id=str(c.id),
+                    case_number=c.case_number or "",
+                    status="failed",
+                    error="Case not found on court portal",
+                ))
+                continue
+
+            now = datetime.utcnow()
+            c.court_status = result.get("status_text") or c.court_status
+            c.bench_type = result.get("stage") or c.bench_type
+            c.judge_name = result.get("coram") or c.judge_name
+            if result.get("next_hearing_date"):
+                c.next_hearing_date = result.get("next_hearing_date")
+            c.khc_source_url = result.get("full_details_url") or result.get("source_url") or c.khc_source_url
+            c.last_synced_at = now
+            c.sync_status = "synced"
+            c.sync_error = None
+            if result.get("petitioner_name"):
+                c.petitioner_name = result.get("petitioner_name")
+            if result.get("respondent_name"):
+                c.respondent_name = result.get("respondent_name")
+            c.raw_court_data = _json_safe(result)
+
+            refreshed += 1
+            results.append(RefreshAllStatusItem(
+                id=str(c.id),
+                case_number=c.case_number or "",
+                status="ok",
+            ))
+        except Exception as exc:
+            failed += 1
+            results.append(RefreshAllStatusItem(
+                id=str(c.id),
+                case_number=c.case_number or "",
+                status="failed",
+                error=str(exc),
+            ))
+
+    if refreshed > 0 or failed > 0:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    return RefreshAllStatusResponse(
+        refreshed=refreshed,
+        failed=failed,
+        skipped=skipped,
+        results=results,
+    )
 
 
 @router.get("/tracked-status", response_model=List[TrackedCaseStatusResponse])

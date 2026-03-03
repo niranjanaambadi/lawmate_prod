@@ -21,6 +21,8 @@ import {
   getTodayAtCourt,
   getAdvocateCauseList,
   refreshAdvocateCauseList,
+  refreshAllPendingStatuses,
+  refreshOnePendingStatus,
   type AdvocateCauseListRow,
   type AdvocateCauseListResponse,
   type CauseListDayGroup,
@@ -79,6 +81,9 @@ export default function DashboardPage() {
   const [todayAtCourt, setTodayAtCourt] = useState<CauseListDayGroup | null>(null);
   const [pendingRows, setPendingRows] = useState<PendingCaseStatusRow[]>([]);
   const [trackedStatusRows, setTrackedStatusRows] = useState<TrackedCaseStatusRow[]>([]);
+  const [refreshAllLoading, setRefreshAllLoading] = useState(false);
+  const [refreshAllSummary, setRefreshAllSummary] = useState<{ refreshed: number; failed: number; skipped: number } | null>(null);
+  const [rowRefreshingId, setRowRefreshingId] = useState<string | null>(null);
 
   // Advocate cause list state
   const [causeList, setCauseList] = useState<AdvocateCauseListResponse | null>(null);
@@ -246,6 +251,16 @@ export default function DashboardPage() {
     return () => { ignore = true; };
   }, [token]);
 
+  const reloadPendingRows = async () => {
+    if (!token) return;
+    try {
+      const rows = await getPendingCaseStatuses(token);
+      setPendingRows(rows);
+    } catch {
+      setPendingRows([]);
+    }
+  };
+
   useEffect(() => {
     let ignore = false;
     const loadPending = async () => {
@@ -260,6 +275,34 @@ export default function DashboardPage() {
     void loadPending();
     return () => { ignore = true; };
   }, [token]);
+
+  const handleRefreshAll = async () => {
+    if (!token || refreshAllLoading) return;
+    setRefreshAllLoading(true);
+    setRefreshAllSummary(null);
+    try {
+      const result = await refreshAllPendingStatuses(token);
+      setRefreshAllSummary({ refreshed: result.refreshed, failed: result.failed, skipped: result.skipped });
+      await reloadPendingRows();
+    } catch {
+      setRefreshAllSummary({ refreshed: 0, failed: pendingRows.length, skipped: 0 });
+    } finally {
+      setRefreshAllLoading(false);
+    }
+  };
+
+  const handleRefreshOneRow = async (caseId: string) => {
+    if (!token || rowRefreshingId) return;
+    setRowRefreshingId(caseId);
+    try {
+      await refreshOnePendingStatus(token, caseId);
+      await reloadPendingRows();
+    } catch {
+      // row stays with stale data; silent failure is acceptable here
+    } finally {
+      setRowRefreshingId(null);
+    }
+  };
 
   // Load advocate cause list (tomorrow by default)
   useEffect(() => {
@@ -630,7 +673,7 @@ export default function DashboardPage() {
       {/* Status Updates — pending cases with latest hearing history */}
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <CardTitle>Status Updates</CardTitle>
               <CardDescription>
@@ -638,20 +681,41 @@ export default function DashboardPage() {
                   ? `${pendingRows.length} pending case${pendingRows.length !== 1 ? "s" : ""} — latest hearing details from court`
                   : "Pending cases with latest hearing details from court"}
               </CardDescription>
+              {refreshAllSummary && (
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Last sync: {refreshAllSummary.refreshed} updated
+                  {refreshAllSummary.failed > 0 && `, ${refreshAllSummary.failed} failed`}
+                  {refreshAllSummary.skipped > 0 && `, ${refreshAllSummary.skipped} skipped`}
+                </p>
+              )}
             </div>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/dashboard/cases?status=pending">
-                View all pending
-                <ArrowRight className="ml-2 h-3.5 w-3.5" />
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefreshAll}
+                disabled={refreshAllLoading || pendingRows.length === 0}
+                title="Sync all pending cases from KHC portal"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshAllLoading ? "animate-spin" : ""}`} />
+                {refreshAllLoading ? "Syncing…" : "Refresh All"}
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/dashboard/cases?status=pending">
+                  View all
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
           {pendingRows.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <Clock3 className="mb-2 h-8 w-8 text-slate-200" />
-              <p className="text-sm text-slate-500">No pending cases found. Refresh a case from the court portal to populate this list.</p>
+              <p className="text-sm text-slate-500">
+                No pending cases found. Add cases with status &quot;pending&quot; or use the case detail page to sync from the court portal.
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -663,29 +727,49 @@ export default function DashboardPage() {
                     <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">Tentative Date</th>
                     <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">Purpose of Hearing</th>
                     <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">Order</th>
-                    <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">Hon&apos; Judge Name</th>
+                    <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">Hon&apos; Judge</th>
+                    <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">Sync</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {pendingRows.map((row) => (
-                    <tr key={row.id} className="group transition-colors hover:bg-slate-50">
-                      <td className="py-3 pr-4">
-                        <Link
-                          href={`/dashboard/cases/${row.id}`}
-                          className="font-medium text-indigo-600 hover:underline"
-                        >
-                          {row.case_number}
-                        </Link>
-                      </td>
-                      <td className="py-3 pr-4 text-slate-600">{row.business_date || "-"}</td>
-                      <td className="py-3 pr-4 text-slate-600">{row.tentative_date || "-"}</td>
-                      <td className="py-3 pr-4 text-slate-600">{row.purpose_of_hearing || "-"}</td>
-                      <td className="py-3 pr-4 max-w-[14rem] text-slate-600">
-                        <span className="line-clamp-2">{row.order_text || "-"}</span>
-                      </td>
-                      <td className="py-3 text-slate-600">{row.judge_name || "-"}</td>
-                    </tr>
-                  ))}
+                  {pendingRows.map((row) => {
+                    const isRowRefreshing = rowRefreshingId === row.id;
+                    const neverSynced = !row.last_synced_at;
+                    return (
+                      <tr key={row.id} className="group transition-colors hover:bg-slate-50">
+                        <td className="py-3 pr-4">
+                          <Link
+                            href={`/dashboard/cases/${row.id}`}
+                            className="font-medium text-indigo-600 hover:underline"
+                          >
+                            {row.case_number}
+                          </Link>
+                          {neverSynced && (
+                            <span className="ml-2 inline-block rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                              Not synced
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4 text-slate-600">{row.business_date || "-"}</td>
+                        <td className="py-3 pr-4 text-slate-600">{row.tentative_date || "-"}</td>
+                        <td className="py-3 pr-4 text-slate-600">{row.purpose_of_hearing || "-"}</td>
+                        <td className="py-3 pr-4 max-w-[14rem] text-slate-600">
+                          <span className="line-clamp-2">{row.order_text || "-"}</span>
+                        </td>
+                        <td className="py-3 pr-4 text-slate-600">{row.judge_name || "-"}</td>
+                        <td className="py-3">
+                          <button
+                            onClick={() => handleRefreshOneRow(row.id)}
+                            disabled={!!rowRefreshingId || refreshAllLoading}
+                            title={`Refresh ${row.case_number} from KHC portal`}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${isRowRefreshing ? "animate-spin text-indigo-600" : ""}`} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
