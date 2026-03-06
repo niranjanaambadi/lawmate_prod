@@ -122,6 +122,20 @@ if HAS_ADVOCATE_CAUSE_LIST:
         tags=["Advocate Cause List"],
     )
 
+# Daily Cause List (parsed PDF data — today/relevant/all/rendered-html/sync)
+try:
+    from app.api.v1.endpoints import causelist as causelist_endpoint
+    HAS_CAUSELIST = True
+except ImportError:
+    HAS_CAUSELIST = False
+
+if HAS_CAUSELIST:
+    api_router.include_router(
+        causelist_endpoint.router,
+        prefix="/causelist",
+        tags=["Cause List"],
+    )
+
 # Document Comparison
 try:
     from app.api.v1.endpoints import doc_compare as doc_compare_endpoint
