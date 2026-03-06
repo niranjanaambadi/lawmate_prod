@@ -57,17 +57,29 @@ CASE_TYPE_ALIASES: Dict[str, Tuple[str, ...]] = {
 # Fallback when the dropdown options cannot be parsed from the portal response.
 # Keys must be normalized with _normalize_token().
 KNOWN_CASE_TYPE_VALUES: Dict[str, str] = {
-    "WPC": "157",      # WP(C)
-    "WPCRL": "158",    # WP(Crl.)
-    "WA": "154",       # WA
-    "CRLA": "33",      # CRL.A
-    "CRLMC": "37",     # Crl.MC
-    "OPC": "99",       # OP(C)
-    "OPCRL": "101",    # OP(Crl.)
-    "RFA": "122",      # RFA
-    "RSA": "130",      # RSA
-    "SA": "132",       # SA
-    "MFA": "87",       # MFA
+    "WPC": "157",           # WP(C)
+    "WPCRL": "158",         # WP(Crl.)
+    "WA": "154",            # WA
+    "CRLA": "33",           # CRL.A
+    "CRLMC": "37",          # Crl.MC
+    "OPC": "99",            # OP(C)
+    "OPCRL": "101",         # OP(Crl.)
+    "RFA": "122",           # RFA
+    "RSA": "130",           # RSA
+    "SA": "132",            # SA
+    "MFA": "87",            # MFA
+    # Matrimonial
+    "MATAPPEAL": "80",      # Mat.Appeal
+    "MATA": "80",           # Mat.Appeal (alias)
+    "MATCAS": "81",         # Mat.Cas
+    # Criminal
+    "CRLREVPET": "55",      # Crl.Rev.Pet
+    "CRLREF": "46",         # CRL.REF
+    # Other common
+    "FA": "72",             # FA
+    "FAO": "74",            # FAO
+    "MACA": "83",           # MACA
+    "ITA": "110",           # ITA
 }
 
 SELECTORS: Dict[str, str] = {
@@ -222,7 +234,12 @@ class CourtApiService:
         )
 
     def _fetch_status_page_content(self, req: Any) -> str:
-        response = req.get(self.status_url, timeout=120000)
+        # Fetch the form page as a regular browser navigation (no AJAX header).
+        response = req.get(
+            self.status_url,
+            timeout=120000,
+            headers={"X-Requested-With": ""},   # override: not an AJAX call
+        )
         if response.status >= 400:
             raise RuntimeError(f"Status page returned {response.status}")
         return response.text()
@@ -236,7 +253,8 @@ class CourtApiService:
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
                 )
             )
-            page.goto(self.status_url, wait_until="commit", timeout=120000)
+            # Use domcontentloaded so the full HTML (including the case_type select) is parsed.
+            page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
             return page.content()
         finally:
             browser.close()
@@ -369,8 +387,9 @@ class CourtApiService:
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
                 )
             )
-            page.goto(self.status_url, wait_until="commit", timeout=120000)
-            page.select_option(SELECTORS["case_type"], case_type_value)
+            # Wait for full DOM so the case_type select is guaranteed to be present.
+            page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
+            page.select_option(SELECTORS["case_type"], case_type_value, timeout=60000)
             page.fill(SELECTORS["case_no"], case_no)
             page.fill(SELECTORS["case_year"], case_year)
 
