@@ -139,24 +139,30 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> List[str]:
-        """Parse CORS origins from JSON string to list"""
+        """Parse CORS origins from JSON string or comma-separated string to list."""
         raw = (self.CORS_ORIGINS or "").strip()
-    
-        # If empty, return localhost for dev
+
+        # Strip surrounding quotes that Railway/shell may add
+        if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+            raw = raw[1:-1].strip()
+
         if not raw:
             return ["http://localhost:3000"]
-    
-        try:
-            # If it's a JSON array string
-            if raw.startswith("["):
+
+        # Try JSON array first (handles both ["a","b"] and [\"a\",\"b\"] forms)
+        if raw.startswith("["):
+            try:
                 parsed = json.loads(raw)
-                return [str(x).strip() for x in parsed if str(x).strip()]
-        
-            # If it's a comma-separated string
-            return [x.strip() for x in raw.split(",") if x.strip()]
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse CORS_ORIGINS: {raw}")
-            return ["http://localhost:3000"]
+                result = [str(x).strip() for x in parsed if str(x).strip()]
+                if result:
+                    return result
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # Fallback: strip brackets and split
+            raw = raw.lstrip("[").rstrip("]").replace('"', '').replace("'", "")
+
+        # Comma-separated (most reliable Railway format)
+        return [x.strip() for x in raw.split(",") if x.strip()]
 
     # Legal translation
     LEGAL_TRANSLATE_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
