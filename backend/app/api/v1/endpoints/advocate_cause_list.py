@@ -27,6 +27,7 @@ from app.services.advocate_causelist_service import (
     fetch_and_store_advocate_causelist,
     lookup_advocate_code,
 )
+from app.services import scraper_client_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -226,14 +227,26 @@ async def refresh_advocate_cause_list(
     )
 
     try:
-        rows = await fetch_and_store_advocate_causelist(
-            advocate_name=adv_name,
-            target_date=fetch_date,
-            lawyer_id=lawyer_id,
-            db=db,
-            enrollment_number=enrollment,
-            advocate_code=adv_code,
-        )
+        if scraper_client_service.is_scraper_remote():
+            # ── Oracle VM path ────────────────────────────────────────────────
+            # Oracle VM fetches from hckinfo (Indian IP) and writes rows to DB.
+            # Railway then re-reads those rows from DB to build the response.
+            scraper_client_service.scrape_cause_list(
+                user_id=lawyer_id,
+                target_date=str(fetch_date),
+            )
+            # Re-read rows from DB (Oracle VM already wrote them).
+            rows = _fetch_from_cache(db, lawyer_id, fetch_date)
+        else:
+            # ── Local fetch path (fallback) ───────────────────────────────────
+            rows = await fetch_and_store_advocate_causelist(
+                advocate_name=adv_name,
+                target_date=fetch_date,
+                lawyer_id=lawyer_id,
+                db=db,
+                enrollment_number=enrollment,
+                advocate_code=adv_code,
+            )
     except Exception as exc:
         logger.exception(
             "Live fetch failed for user %s on %s: %s", lawyer_id, fetch_date, exc

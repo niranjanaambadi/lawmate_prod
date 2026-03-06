@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     CASES_RECYCLE_BIN_PURGE_ENABLED: bool = True
     CASES_RECYCLE_BIN_RETENTION_DAYS: int = 90
 
+    # Oracle VM Scraper Service
+    # Set SCRAPER_SERVICE_URL to route on-demand scraping calls to the Oracle
+    # Cloud VM (Indian IP) instead of running Playwright locally on Railway.
+    # Leave empty to fall back to local Playwright.
+    SCRAPER_SERVICE_URL: str = ""          # e.g. http://129.154.254.110:8001
+    SCRAPER_SERVICE_SECRET: str = ""       # shared x-scraper-secret header
+    SCRAPER_SERVICE_TIMEOUT: int = 120     # seconds per request
+
     # MCP live-status integration
     MCP_LIVE_STATUS_URL: str = ""
     MCP_LIVE_STATUS_TOKEN: str = ""

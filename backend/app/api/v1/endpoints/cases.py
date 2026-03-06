@@ -30,6 +30,7 @@ from app.db.schemas import (
 )
 from app.api.deps import get_current_user
 from app.services.case_sync_service import case_sync_service
+from app.services import scraper_client_service
 
 router = APIRouter()
 
@@ -332,39 +333,60 @@ def refresh_all_pending_statuses(
             continue
 
         try:
-            result = case_sync_service.query_case_status(case_number)
-            if not result.get("found"):
-                failed += 1
+            if scraper_client_service.is_scraper_remote():
+                # ── Oracle VM path ────────────────────────────────────────────
+                # Oracle VM handles Playwright + DB write for each case.
+                result = scraper_client_service.scrape_case(str(c.id))
+                if not result.get("found"):
+                    failed += 1
+                    results.append(RefreshAllStatusItem(
+                        id=str(c.id),
+                        case_number=c.case_number or "",
+                        status="failed",
+                        error="Case not found on court portal",
+                    ))
+                    continue
+                refreshed += 1
                 results.append(RefreshAllStatusItem(
                     id=str(c.id),
                     case_number=c.case_number or "",
-                    status="failed",
-                    error="Case not found on court portal",
+                    status="ok",
                 ))
-                continue
+            else:
+                # ── Local Playwright path (fallback) ──────────────────────────
+                result = case_sync_service.query_case_status(case_number)
+                if not result.get("found"):
+                    failed += 1
+                    results.append(RefreshAllStatusItem(
+                        id=str(c.id),
+                        case_number=c.case_number or "",
+                        status="failed",
+                        error="Case not found on court portal",
+                    ))
+                    continue
 
-            now = datetime.utcnow()
-            c.court_status = result.get("status_text") or c.court_status
-            c.bench_type = result.get("stage") or c.bench_type
-            c.judge_name = result.get("coram") or c.judge_name
-            if result.get("next_hearing_date"):
-                c.next_hearing_date = result.get("next_hearing_date")
-            c.khc_source_url = result.get("full_details_url") or result.get("source_url") or c.khc_source_url
-            c.last_synced_at = now
-            c.sync_status = "synced"
-            c.sync_error = None
-            if result.get("petitioner_name"):
-                c.petitioner_name = result.get("petitioner_name")
-            if result.get("respondent_name"):
-                c.respondent_name = result.get("respondent_name")
-            c.raw_court_data = _json_safe(result)
+                now = datetime.utcnow()
+                c.court_status = result.get("status_text") or c.court_status
+                c.bench_type = result.get("stage") or c.bench_type
+                c.judge_name = result.get("coram") or c.judge_name
+                if result.get("next_hearing_date"):
+                    c.next_hearing_date = result.get("next_hearing_date")
+                c.khc_source_url = result.get("full_details_url") or result.get("source_url") or c.khc_source_url
+                c.last_synced_at = now
+                c.sync_status = "synced"
+                c.sync_error = None
+                if result.get("petitioner_name"):
+                    c.petitioner_name = result.get("petitioner_name")
+                if result.get("respondent_name"):
+                    c.respondent_name = result.get("respondent_name")
+                c.raw_court_data = _json_safe(result)
 
-            refreshed += 1
-            results.append(RefreshAllStatusItem(
-                id=str(c.id),
-                case_number=c.case_number or "",
-                status="ok",
-            ))
+                refreshed += 1
+                results.append(RefreshAllStatusItem(
+                    id=str(c.id),
+                    case_number=c.case_number or "",
+                    status="ok",
+                ))
         except Exception as exc:
             failed += 1
             results.append(RefreshAllStatusItem(
@@ -477,28 +499,41 @@ def refresh_case_status_for_case(
         )
 
     try:
-        result = case_sync_service.query_case_status(case_number)
-        if not result.get("found"):
+        if scraper_client_service.is_scraper_remote():
+            # ── Oracle VM path ────────────────────────────────────────────────
+            # Oracle VM fetches from court (Indian IP), enriches, writes to DB.
+            # We just return the full result dict it sends back.
+            result = scraper_client_service.scrape_case(str(case_id))
+            if not result.get("found"):
+                return result
+            # Refresh the SQLAlchemy session so the DB changes from Oracle VM
+            # are visible if the caller re-reads the object in this session.
+            db.expire(case)
             return result
+        else:
+            # ── Local Playwright path (fallback) ──────────────────────────────
+            result = case_sync_service.query_case_status(case_number)
+            if not result.get("found"):
+                return result
 
-        now = datetime.utcnow()
-        case.court_status = result.get("status_text") or case.court_status
-        case.bench_type = result.get("stage") or case.bench_type
-        case.judge_name = result.get("coram") or case.judge_name
-        if result.get("next_hearing_date"):
-            case.next_hearing_date = result.get("next_hearing_date")
-        case.khc_source_url = result.get("full_details_url") or result.get("source_url") or case.khc_source_url
-        case.last_synced_at = now
-        case.sync_status = "synced"
-        case.sync_error = None
-        if result.get("petitioner_name"):
-            case.petitioner_name = result.get("petitioner_name")
-        if result.get("respondent_name"):
-            case.respondent_name = result.get("respondent_name")
-        case.raw_court_data = _json_safe(result)
+            now = datetime.utcnow()
+            case.court_status = result.get("status_text") or case.court_status
+            case.bench_type = result.get("stage") or case.bench_type
+            case.judge_name = result.get("coram") or case.judge_name
+            if result.get("next_hearing_date"):
+                case.next_hearing_date = result.get("next_hearing_date")
+            case.khc_source_url = result.get("full_details_url") or result.get("source_url") or case.khc_source_url
+            case.last_synced_at = now
+            case.sync_status = "synced"
+            case.sync_error = None
+            if result.get("petitioner_name"):
+                case.petitioner_name = result.get("petitioner_name")
+            if result.get("respondent_name"):
+                case.respondent_name = result.get("respondent_name")
+            case.raw_court_data = _json_safe(result)
 
-        db.commit()
-        return result
+            db.commit()
+            return result
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Case status lookup failed: {exc}")
 
