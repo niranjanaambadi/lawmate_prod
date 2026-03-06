@@ -37,6 +37,21 @@ CASE_TYPE_ALIASES: Dict[str, Tuple[str, ...]] = {
     "TA": ("TA",),
     "TESTP": ("Test.P",),
     "TRP": ("TR.P",),
+    # Matrimonial / Family
+    "MATAPPEAL": ("Mat.A", "MAT.A", "Mat. Appeal", "MAT. APPEAL", "Mat.Appeal"),
+    "MATA": ("Mat.A", "MAT.A", "Mat. Appeal"),
+    "MATCASE": ("Mat.C", "MAT.C", "Mat. Case"),
+    # Criminal misc / revision
+    "CRLREV": ("CRL.REV.P", "Crl.Rev.P"),
+    "CRLOP": ("CRL.OP", "Crl.OP"),
+    # Other appeals
+    "CA": ("C.A", "Civil Appeal"),
+    "COMA": ("COM.A", "Com.A", "Company Appeal"),
+    "ITA": ("IT.A", "ITA", "Income Tax Appeal"),
+    "CUST": ("Cust.A", "Customs Appeal"),
+    "CEMA": ("CEM.A", "Central Excise Misc Appeal"),
+    "COC": ("Cont.C", "Contempt of Court"),
+    "CONTP": ("Cont.P", "Contempt Petition"),
 }
 
 # Fallback when the dropdown options cannot be parsed from the portal response.
@@ -551,8 +566,19 @@ class CourtApiService:
                         captcha_word=captcha_word,
                     )
                 except Exception as exc:
-                    if "Court search failed with 400" in str(exc):
-                        logger.warning("Court search 400 via request context, retrying in browser context")
+                    exc_str = str(exc)
+                    # The plain request context has no session cookies, so the portal
+                    # may return 400 or 500. Always retry via browser (which loads the
+                    # page first to obtain cookies/CSRF) before giving up.
+                    if (
+                        "Court search failed" in exc_str
+                        or "Court portal returned" in exc_str
+                        or "RateLimitError" in type(exc).__name__
+                    ):
+                        logger.warning(
+                            "Court search failed via plain request context (%s), retrying in browser context",
+                            exc_str,
+                        )
                         return self._search_and_fetch_detail_via_browser(
                             p=p,
                             case_number=case_number,
