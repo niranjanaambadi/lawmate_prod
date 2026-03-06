@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,6 @@ import {
   refreshCaseStatusForCase,
   type DocumentListItem,
   type CaseStatusLookupResult,
-  type HearingNoteResponse,
 } from "@/lib/api";
 
 type CaseDetail = Record<string, unknown> & {
@@ -96,56 +96,46 @@ export default function CaseDetailPage() {
   const params = useParams<{ caseId: string }>();
   const caseId = params.caseId;
   const { token } = useAuth();
-  const [data, setData] = useState<CaseDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [documents, setDocuments] = useState<DocumentListItem[]>([]);
-  const [hearingNote, setHearingNote] = useState<HearingNoteResponse | null>(null);
+  const queryClient = useQueryClient();
+
+  // In-memory overlay: shown immediately after a court refresh, persists until unmount
   const [latestCourtData, setLatestCourtData] = useState<CaseStatusLookupResult | null>(null);
-  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [showHearingNotes, setShowHearingNotes] = useState(false);
-  const [loadingHearingNotes, setLoadingHearingNotes] = useState(false);
 
   // PDF upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadTitle, setUploadTitle] = useState("");
-  const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const loadAll = async () => {
-    if (!token || !caseId) return;
-    const [caseRes, docRes, noteRes] = await Promise.all([
-      getCaseById(caseId, token),
-      getCaseDocuments(caseId, token),
-      getHearingNote(caseId, token).catch(() => null),
-    ]);
-    setData(caseRes as CaseDetail);
-    setDocuments(docRes.items || docRes.data || []);
-    setHearingNote(noteRes);
-  };
+  // ── Queries ────────────────────────────────────────────────────────────────
+  const caseQuery = useQuery<CaseDetail>({
+    queryKey: ["case", caseId, token],
+    queryFn: () => getCaseById(caseId, token!) as Promise<CaseDetail>,
+    enabled: !!token && !!caseId,
+    staleTime: 2 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    if (!token || !caseId) return;
-    let ignore = false;
-    setLoading(true);
-    setLoadError(null);
-    loadAll()
-      .catch((e) => {
-        if (ignore) return;
-        setLoadError(e instanceof Error ? e.message : "Failed to load case");
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
+  const docsQuery = useQuery({
+    queryKey: ["caseDocuments", caseId, token],
+    queryFn: async () => {
+      const res = await getCaseDocuments(caseId, token!);
+      return (res.items || res.data || []) as DocumentListItem[];
+    },
+    enabled: !!token && !!caseId,
+    staleTime: 2 * 60 * 1000,
+  });
 
-    return () => {
-      ignore = true;
-    };
-  }, [token, caseId]);
+  const hearingNoteQuery = useQuery({
+    queryKey: ["hearingNote", caseId, token],
+    queryFn: () => getHearingNote(caseId, token!).catch(() => null),
+    enabled: !!token && !!caseId && showHearingNotes,
+    staleTime: 5 * 60 * 1000,
+  });
 
+  // ── Mutations ──────────────────────────────────────────────────────────────
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
   const openDocument = async (doc: DocumentListItem) => {
     if (!token) return;
     try {
@@ -160,69 +150,68 @@ export default function CaseDetailPage() {
     }
   };
 
-  const toggleHearingNotes = async () => {
-    if (!token || !caseId) return;
-    if (showHearingNotes) {
-      setShowHearingNotes(false);
-      return;
-    }
-    try {
-      setLoadingHearingNotes(true);
-      const noteRes = await getHearingNote(caseId, token).catch(() => null);
-      setHearingNote(noteRes);
-      setShowHearingNotes(true);
-    } finally {
-      setLoadingHearingNotes(false);
-    }
-  };
-
-  const refreshFromCourt = async () => {
-    if (!token || !caseId) return;
-    try {
-      setRefreshing(true);
-      setActionError(null);
-      const live: CaseStatusLookupResult = await refreshCaseStatusForCase(caseId, token);
+  const refreshMutation = useMutation({
+    mutationFn: () => refreshCaseStatusForCase(caseId, token!),
+    onSuccess: (live: CaseStatusLookupResult) => {
       if (!live.found) {
         setActionError(live.message || "Case not found on court portal.");
         return;
       }
       setLatestCourtData(live);
-      await loadAll();
-    } catch (e) {
+      // Invalidate so all pages using this case get fresh DB data
+      void queryClient.invalidateQueries({ queryKey: ["case", caseId, token] });
+      void queryClient.invalidateQueries({ queryKey: ["caseDocuments", caseId, token] });
+      void queryClient.invalidateQueries({ queryKey: ["hearingNote", caseId, token] });
+      void queryClient.invalidateQueries({ queryKey: ["pendingStatuses", token] });
+    },
+    onError: (e) => {
       setActionError(e instanceof Error ? e.message : "Failed to refresh case details");
-    } finally {
-      setRefreshing(false);
-    }
-  };
+    },
+  });
 
-  const handleUploadPdf = async () => {
-    if (!token || !caseId || !uploadFile) return;
-    try {
-      setUploading(true);
-      setUploadError(null);
-      const title = uploadTitle.trim() || uploadFile.name.replace(/\.pdf$/i, "");
-      await importLocalDocument({ caseId, title, file: uploadFile }, token);
-      // Refresh document list
-      const docRes = await getCaseDocuments(caseId, token);
-      setDocuments(docRes.items || docRes.data || []);
-      // Reset upload form
+  const uploadMutation = useMutation({
+    mutationFn: () => {
+      const title = uploadTitle.trim() || uploadFile!.name.replace(/\.pdf$/i, "");
+      return importLocalDocument({ caseId, title, file: uploadFile! }, token!);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["caseDocuments", caseId, token] });
       setUploadFile(null);
       setUploadTitle("");
+      setUploadError(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (e) {
+    },
+    onError: (e) => {
       setUploadError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploading(false);
+    },
+  });
+
+  const toggleHearingNotes = () => {
+    if (showHearingNotes) {
+      setShowHearingNotes(false);
+      return;
     }
+    setShowHearingNotes(true);
+    // query becomes enabled, fetches automatically
   };
+
+  // ── Derived display values ────────────────────────────────────────────────
+  const data = caseQuery.data ?? null;
+  const loading = caseQuery.isLoading;
+  const loadError = caseQuery.error instanceof Error ? caseQuery.error.message : null;
+  const documents: DocumentListItem[] = docsQuery.data ?? [];
+  const hearingNote = hearingNoteQuery.data ?? null;
+  const loadingHearingNotes = hearingNoteQuery.isLoading;
+  const refreshing = refreshMutation.isPending;
+  const uploading = uploadMutation.isPending;
 
   if (loading) return <div className="text-slate-600">Loading case details...</div>;
   if (loadError) return <div className="text-red-600">{loadError}</div>;
   if (!data) return <div className="text-slate-600">Case not found.</div>;
+
   const displayHistory = (latestCourtData?.hearing_history || data.hearing_history || null) as Record<string, unknown>[] | null;
   const historyRows = Array.isArray(displayHistory) ? displayHistory : [];
 
-  // Deduplicate by composite key: business_date + judge_name + purpose + order
   const deduplicatedHistoryRows = (() => {
     const seen = new Set<string>();
     return historyRows.filter((row) => {
@@ -270,6 +259,7 @@ export default function CaseDetailPage() {
     latestCourtData?.next_hearing_date ||
     data.next_hearing_date ||
     (lastHistoryRow ? getFirstValue(lastHistoryRow, ["next_date", "tentative_date"]) : null);
+
   const displayCnr = asText(latestCourtData?.cnr_number ?? data.cnr_number ?? null);
 
   return (
@@ -348,7 +338,12 @@ export default function CaseDetailPage() {
               <p className="text-xs uppercase text-slate-500">Last Synced</p>
               <div className="flex flex-wrap items-center gap-2">
                 <span>{formatDate(data.last_synced_at)}</span>
-                <Button variant="outline" size="sm" onClick={refreshFromCourt} disabled={refreshing}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refreshMutation.mutate()}
+                  disabled={refreshing}
+                >
                   {refreshing ? "Refreshing..." : "Refresh from Court"}
                 </Button>
               </div>
@@ -429,7 +424,6 @@ export default function CaseDetailPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle>Documents</CardTitle>
             <div className="flex items-center gap-2">
-              {/* Hidden file input */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -450,7 +444,12 @@ export default function CaseDetailPage() {
                 <Paperclip className="mr-1.5 h-4 w-4" />
                 Upload PDF
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void toggleHearingNotes()} disabled={loadingHearingNotes}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={toggleHearingNotes}
+                disabled={loadingHearingNotes}
+              >
                 {loadingHearingNotes
                   ? "Loading notes..."
                   : showHearingNotes
@@ -461,7 +460,6 @@ export default function CaseDetailPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Inline upload form — shown after user picks a file */}
           {uploadFile && (
             <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 space-y-3">
               <p className="text-sm font-medium text-indigo-900 flex items-center gap-2">
@@ -479,7 +477,7 @@ export default function CaseDetailPage() {
                   onChange={(e) => setUploadTitle(e.target.value)}
                   disabled={uploading}
                 />
-                <Button size="sm" onClick={() => void handleUploadPdf()} disabled={uploading}>
+                <Button size="sm" onClick={() => uploadMutation.mutate()} disabled={uploading}>
                   {uploading ? (
                     <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />Uploading…</>
                   ) : (
@@ -557,6 +555,5 @@ export default function CaseDetailPage() {
         </CardContent>
       </Card>
     </div>
- 
   );
 }
