@@ -387,15 +387,14 @@ class CourtApiService:
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
                 )
             )
-            # Wait for full DOM so the case_type select is guaranteed to be present.
+            # Navigate to the status page to establish session cookies.
+            # We do NOT interact with form elements (select_option/fill) because the
+            # POST sends values directly — form interaction only caused timeouts under
+            # concurrent load. We just need cookies + the captcha token.
             page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
-            page.select_option(SELECTORS["case_type"], case_type_value, timeout=60000)
-            page.fill(SELECTORS["case_no"], case_no)
-            page.fill(SELECTORS["case_year"], case_year)
 
+            # Read captcha token from the hidden input (quick, no interaction needed).
             captcha_word = self._resolve_captcha_text(page, prefer_solver=False)
-            if captcha_word:
-                page.fill(SELECTORS["captcha_input"], captcha_word)
 
             response = page.request.post(
                 self.search_url,
@@ -409,14 +408,9 @@ class CourtApiService:
                 headers={"X-Requested-With": "XMLHttpRequest", "Referer": self.status_url},
             )
             if response.status == 400 and settings.CAPTCHA_ENABLED:
-                # Retry once with OCR/human-solver token in case hidden value is rejected.
-                page.goto(self.status_url, wait_until="commit", timeout=120000)
-                page.select_option(SELECTORS["case_type"], case_type_value)
-                page.fill(SELECTORS["case_no"], case_no)
-                page.fill(SELECTORS["case_year"], case_year)
+                # Retry once with OCR/human-solver captcha token.
+                page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
                 captcha_word = self._resolve_captcha_text(page, prefer_solver=True)
-                if captcha_word:
-                    page.fill(SELECTORS["captcha_input"], captcha_word)
                 response = page.request.post(
                     self.search_url,
                     form={
