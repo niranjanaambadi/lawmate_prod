@@ -523,6 +523,22 @@ class CourtApiService:
     def _extract_proceedings_payload_candidates(self, detail_html: str, cino: str, case_no: str) -> List[Dict[str, str]]:
         candidates: List[Dict[str, str]] = []
         html = detail_html or ""
+
+        # The detail page sets a hidden input: <input id="cinoz" name="cinoz" value="CINO">
+        # and the JS does:  $.ajax({ data: { cinoz: cinoz } })
+        # Extract cinoz value from the hidden input if present.
+        cinoz_val = cino  # default to cino
+        m_cinoz = re.search(r'id=["\']cinoz["\']\s+name=["\']cinoz["\']\s+value=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if not m_cinoz:
+            m_cinoz = re.search(r'name=["\']cinoz["\']\s[^>]*value=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if not m_cinoz:
+            m_cinoz = re.search(r'value=["\']([^"\']+)["\']\s[^>]*name=["\']cinoz["\']', html, re.IGNORECASE)
+        if m_cinoz:
+            cinoz_val = m_cinoz.group(1).strip()
+
+        # cinoz-keyed payload (current portal AJAX format)
+        candidates.append({"cinoz": cinoz_val})
+
         # Common pattern: getProceedings('cino','case_no') or with more args.
         match = re.search(r"getProceedings\(([^)]*)\)", html, flags=re.IGNORECASE)
         if match:
