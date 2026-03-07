@@ -6,6 +6,8 @@ import re
 import time
 from typing import Any, Dict, Optional, Tuple, List
 
+import httpx
+
 from app.core.config import settings
 from app.core.logger import logger
 from app.services.captcha_solver_service import captcha_solver_service
@@ -383,16 +385,24 @@ class CourtApiService:
         self,
         p: Any,
         case_number: str,
-        case_type_value: str,
         case_no: str,
         case_year: str,
+        case_type: str = "",
+        case_type_value: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
+        """
+        Playwright headless-browser fallback.
+
+        Pass either ``case_type_value`` (already resolved) **or** ``case_type``
+        (raw string such as "Mat.Appeal") and this method will extract the
+        dropdown value from the loaded page content.
+        """
         browser = self._launch_browser(p)
         try:
             page = browser.new_page(
                 user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 )
             )
             # Navigate to the status page to establish the ci_session cookie.
@@ -409,6 +419,24 @@ class CourtApiService:
                     f"Court portal status page returned {nav_resp.status if nav_resp else 'no response'} "
                     "after 3 attempts — ci_session could not be established."
                 )
+
+            # If case_type_value was not pre-resolved, extract it from the
+            # page content now (avoids an extra browser launch just to get the dropdown).
+            if not case_type_value and case_type:
+                page_content = page.content()
+                select_block = ""
+                m_sel = re.search(
+                    r"(<select[^>]*id=\"case_type\"[\s\S]*?</select>)",
+                    page_content,
+                    flags=re.IGNORECASE,
+                )
+                if m_sel:
+                    select_block = m_sel.group(1)
+                case_type_value = self._case_type_value(select_block or page_content, case_type)
+                if not case_type_value:
+                    raise ValueError(f"INVALID_CASE_TYPE: {case_type}")
+            if not case_type_value:
+                raise ValueError("case_type_value could not be determined for browser fallback")
 
             # Read captcha token from the hidden input (quick, no interaction needed).
             captcha_word = self._resolve_captcha_text(page, prefer_solver=False)
@@ -553,13 +581,228 @@ class CourtApiService:
         logger.warning("Proceedings fetch failed for cino=%s case_no=%s", cino, case_no)
         return ""
 
-    def fetch_case_status(self, case_number: str) -> Optional[Dict[str, Any]]:
-        if sync_playwright is None:
-            raise RuntimeError(
-                "Playwright Python package is not installed. "
-                "Install with `pip install playwright` and install the browser with "
-                "`playwright install chromium`."
+    # ──────────────────────────────────────────────────────────────────────────
+    # httpx-based primary scrape path (fixes ci_session 500 errors)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _fetch_case_status_via_httpx(
+        self,
+        case_number: str,
+        case_type: str,
+        case_no: str,
+        case_year: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Primary scrape path using httpx.Client() — equivalent to requests.Session().
+
+        httpx.Client() maintains a persistent cookie jar, so the CodeIgniter
+        ci_session cookie set on the initial GET is automatically carried to
+        every subsequent POST.  This is the correct fix for the portal returning
+        HTTP 500 when the session is missing.
+
+        Raises ValueError for INVALID_CASE_TYPE (do not retry via browser).
+        Raises RuntimeError for network / portal errors (browser fallback allowed).
+        """
+        base_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        }
+
+        with httpx.Client(headers=base_headers, follow_redirects=True, timeout=60.0) as client:
+            # ── Step 1: GET status page — sets ci_session in client.cookies ──
+            logger.info("httpx: GET %s", self.status_url)
+            status_resp = client.get(self.status_url)
+            logger.info(
+                "httpx: status page HTTP %s  cookies=%s",
+                status_resp.status_code,
+                list(client.cookies.keys()),
             )
+            if status_resp.status_code >= 400:
+                raise RuntimeError(
+                    f"httpx: Status page returned {status_resp.status_code}"
+                )
+            content = status_resp.text
+
+            # ── Step 2: Resolve case_type dropdown value ──
+            select_block = ""
+            m_select = re.search(
+                r"(<select[^>]*id=\"case_type\"[\s\S]*?</select>)",
+                content,
+                flags=re.IGNORECASE,
+            )
+            if m_select:
+                select_block = m_select.group(1)
+            case_type_value = self._case_type_value(select_block or content, case_type)
+            if not case_type_value:
+                raise ValueError(f"INVALID_CASE_TYPE: {case_type}")
+
+            # ── Step 3: Parse ALL hidden inputs (CSRF token, captcha, etc.) ──
+            # CodeIgniter CSRF protection requires the hidden CSRF token to be
+            # present in the POST body.  We also pick up captcha_word_login here
+            # (if it's rendered server-side rather than by JavaScript).
+            hidden_fields: Dict[str, str] = {}
+            for m_hidden in re.finditer(
+                r"<input[^>]+type=[\"']hidden[\"'][^>]*>",
+                content,
+                flags=re.IGNORECASE,
+            ):
+                tag = m_hidden.group(0)
+                name_m = re.search(r"\bname=[\"']([^\"']+)[\"']", tag, re.IGNORECASE)
+                val_m = re.search(r"\bvalue=[\"']([^\"']*)[\"']", tag, re.IGNORECASE)
+                if name_m:
+                    hidden_fields[name_m.group(1)] = val_m.group(1) if val_m else ""
+
+            captcha_word = hidden_fields.get("captcha_word_login", "")
+            logger.info(
+                "httpx: case_type_value=%s  captcha_word_len=%d  hidden_fields=%s",
+                case_type_value,
+                len(captcha_word),
+                list(hidden_fields.keys()),
+            )
+
+            # ── Step 4: POST search — ci_session + CSRF carried automatically ──
+            post_data: Dict[str, str] = {
+                **hidden_fields,           # includes CSRF token + captcha_word_login
+                "case_type": case_type_value,
+                "case_no": case_no,
+                "case_year": case_year,
+                "captcha_typed_login": captcha_word,
+            }
+            search_resp = client.post(
+                self.search_url,
+                data=post_data,
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": self.status_url,
+                },
+            )
+            logger.info("httpx: search POST HTTP %s", search_resp.status_code)
+            if search_resp.status_code == 429:
+                raise RateLimitError("Court portal rate limit reached")
+            if search_resp.status_code >= 400:
+                raise RuntimeError(
+                    f"Court search failed with {search_resp.status_code} "
+                    f"(case_type={case_type_value}, case_no={case_no}, case_year={case_year})"
+                )
+
+            search_text = search_resp.text
+            try:
+                search_json = json.loads(search_text)
+            except ValueError:
+                search_json = {"p_table": search_text}
+
+            p_table = str(search_json.get("p_table") or "")
+            target = self._extract_click_target(p_table)
+            if not target:
+                low = p_table.lower()
+                if "no case" in low or "no record" in low or "not found" in low:
+                    return None
+                return {
+                    "case_number": case_number,
+                    "source": self.status_url,
+                    "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "payload": {"search_json": search_json, "detail_html": p_table},
+                }
+
+            # ── Step 5: POST view detail ──
+            cino, case_no_internal = target
+            detail_resp = client.post(
+                self.view_url,
+                data={"cino": cino, "case_no": case_no_internal},
+                headers={"Referer": self.search_url},
+            )
+            if detail_resp.status_code >= 400:
+                raise RuntimeError(
+                    f"Viewcasestatus failed with {detail_resp.status_code}"
+                )
+            detail_html = detail_resp.text
+
+            # ── Step 6: Fetch hearing history ──
+            proceedings_html = self._fetch_proceedings_html_httpx(
+                client,
+                cino=cino,
+                case_no=case_no_internal,
+                detail_html=detail_html,
+            )
+            return {
+                "case_number": case_number,
+                "source": self.status_url,
+                "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "payload": {
+                    "search_json": search_json,
+                    "cino": cino,
+                    "case_no": case_no_internal,
+                    "detail_html": detail_html,
+                    "proceedings_html": proceedings_html,
+                },
+            }
+
+    def _fetch_proceedings_html_httpx(
+        self,
+        client: httpx.Client,
+        cino: str,
+        case_no: str,
+        detail_html: str,
+    ) -> str:
+        """
+        Fetch hearing-history HTML using an existing httpx.Client session
+        (so ci_session is carried automatically).
+        """
+        endpoint = (
+            "https://hckinfo.keralacourts.in/digicourt/index.php"
+            "/Queryproceedings/getProceedings"
+        )
+        candidates = self._extract_proceedings_payload_candidates(
+            detail_html, cino=cino, case_no=case_no
+        )
+        for form in candidates:
+            try:
+                res = client.post(
+                    endpoint,
+                    data=form,
+                    headers={
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Referer": self.status_url,
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                )
+                if res.status_code >= 400:
+                    continue
+                text = res.text or ""
+                if "HISTORY OF CASE HEARING" in text.upper() or (
+                    "<table" in text.lower() and "Cause List Type" in text
+                ):
+                    logger.info(
+                        "httpx proceedings success with keys: %s",
+                        ",".join(sorted(form.keys())),
+                    )
+                    return text
+            except Exception:
+                continue
+        logger.warning(
+            "httpx proceedings fetch failed for cino=%s case_no=%s", cino, case_no
+        )
+        return ""
+
+    def fetch_case_status(self, case_number: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch live case status from the Kerala HC portal.
+
+        Strategy (in order):
+        1. **httpx.Client()** — behaves like requests.Session(); persistent cookie
+           jar carries the CodeIgniter ci_session from GET → POST automatically.
+           This is the primary path and fixes the "Court portal returned 500" errors
+           that occurred because Playwright's request context discards cookies.
+        2. **Playwright headless Chromium** — only reached if httpx fails for a
+           non-INVALID_CASE_TYPE reason (e.g., CAPTCHA change, JS-rendered page).
+        """
         if not self.status_url or not self.search_url or not self.view_url:
             raise ValueError("Court Playwright URLs are not configured")
 
@@ -567,60 +810,35 @@ class CourtApiService:
         self._throttle()
 
         try:
+            # ── Primary path: httpx.Client with persistent cookie jar ──────────
+            try:
+                return self._fetch_case_status_via_httpx(
+                    case_number, case_type, case_no, case_year
+                )
+            except ValueError:
+                raise  # INVALID_CASE_TYPE — a browser won't help
+            except Exception as exc:
+                logger.warning(
+                    "httpx path failed for %s (%s) — falling back to Playwright browser",
+                    case_number,
+                    exc,
+                )
+
+            # ── Fallback path: Playwright headless Chromium ───────────────────
+            if sync_playwright is None:
+                raise RuntimeError(
+                    "Playwright Python package is not installed. "
+                    "Install with `pip install playwright` and install the browser "
+                    "with `playwright install chromium`."
+                )
             with sync_playwright() as p:
-                req = self._new_request_context(p, referer=self.status_url)
-                try:
-                    content = self._fetch_status_page_content(req)
-                except Exception as exc:
-                    logger.warning("Status page request fetch failed, using browser fallback: %s", str(exc))
-                    content = self._fallback_fetch_status_page_content(p)
-
-                select_block = ""
-                m_select = re.search(r"(<select[^>]*id=\"case_type\"[\s\S]*?</select>)", content, flags=re.IGNORECASE)
-                if m_select:
-                    select_block = m_select.group(1)
-                case_type_value = self._case_type_value(select_block or content, case_type)
-                if not case_type_value:
-                    raise ValueError(f"INVALID_CASE_TYPE: {case_type}")
-
-                captcha_word = ""
-                m_captcha = re.search(r'id="captcha_word_login"\s+value="([^"]+)"', content, flags=re.IGNORECASE)
-                if m_captcha:
-                    captcha_word = m_captcha.group(1).strip()
-
-                try:
-                    return self._search_and_fetch_detail(
-                        req=req,
-                        case_number=case_number,
-                        case_type_value=case_type_value,
-                        case_no=case_no,
-                        case_year=case_year,
-                        captcha_word=captcha_word,
-                    )
-                except Exception as exc:
-                    exc_str = str(exc)
-                    # The plain request context has no session cookies, so the portal
-                    # may return 400 or 500. Always retry via browser (which loads the
-                    # page first to obtain cookies/CSRF) before giving up.
-                    if (
-                        "Court search failed" in exc_str
-                        or "Court portal returned" in exc_str
-                        or "RateLimitError" in type(exc).__name__
-                    ):
-                        logger.warning(
-                            "Court search failed via plain request context (%s), retrying in browser context",
-                            exc_str,
-                        )
-                        return self._search_and_fetch_detail_via_browser(
-                            p=p,
-                            case_number=case_number,
-                            case_type_value=case_type_value,
-                            case_no=case_no,
-                            case_year=case_year,
-                        )
-                    raise
-                finally:
-                    req.dispose()
+                return self._search_and_fetch_detail_via_browser(
+                    p=p,
+                    case_number=case_number,
+                    case_no=case_no,
+                    case_year=case_year,
+                    case_type=case_type,  # resolved inside from page dropdown
+                )
         finally:
             self._last_call_at = time.monotonic()
 
