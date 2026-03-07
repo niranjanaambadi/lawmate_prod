@@ -221,10 +221,13 @@ class CourtApiService:
         return m.group(1).strip(), m.group(2).strip()
 
     def _new_request_context(self, p: Any, referer: Optional[str] = None) -> Any:
-        headers: Dict[str, str] = {"Accept": "text/html,application/json,*/*;q=0.8"}
+        # Do NOT include X-Requested-With here — it belongs only on AJAX POSTs,
+        # not on the initial status-page GET.  CodeIgniter treats AJAX vs normal
+        # requests differently, and sending the AJAX header on a page-load GET
+        # prevents the server from creating a ci_session cookie.
+        headers: Dict[str, str] = {"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
         if referer:
             headers["Referer"] = referer
-        headers["X-Requested-With"] = "XMLHttpRequest"
         return p.request.new_context(
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -233,16 +236,21 @@ class CourtApiService:
             extra_http_headers=headers,
         )
 
-    def _fetch_status_page_content(self, req: Any) -> str:
-        # Fetch the form page as a regular browser navigation (no AJAX header).
-        response = req.get(
-            self.status_url,
-            timeout=120000,
-            headers={"X-Requested-With": ""},   # override: not an AJAX call
-        )
-        if response.status >= 400:
-            raise RuntimeError(f"Status page returned {response.status}")
-        return response.text()
+    def _fetch_status_page_content(self, req: Any, max_retries: int = 3) -> str:
+        """
+        GET the status page via the request context so that CodeIgniter sets
+        ci_session in `req`.  That same `req` must be reused for the search POST
+        so the session cookie is carried over.  Retries on transient 5xx.
+        """
+        last_status = 0
+        for attempt in range(max_retries):
+            response = req.get(self.status_url, timeout=120000)
+            last_status = response.status
+            if response.status < 400:
+                return response.text()
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        raise RuntimeError(f"Status page returned {last_status} after {max_retries} attempts")
 
     def _fallback_fetch_status_page_content(self, p: Any) -> str:
         browser = self._launch_browser(p)
@@ -387,11 +395,20 @@ class CourtApiService:
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
                 )
             )
-            # Navigate to the status page to establish session cookies.
-            # We do NOT interact with form elements (select_option/fill) because the
-            # POST sends values directly — form interaction only caused timeouts under
-            # concurrent load. We just need cookies + the captcha token.
-            page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
+            # Navigate to the status page to establish the ci_session cookie.
+            # CodeIgniter requires the same session from GET → POST.
+            # Retry up to 3 times if the portal returns a transient 5xx error.
+            for attempt in range(3):
+                nav_resp = page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
+                if nav_resp and nav_resp.status < 400:
+                    break
+                if attempt < 2:
+                    time.sleep(2)
+            else:
+                raise RuntimeError(
+                    f"Court portal status page returned {nav_resp.status if nav_resp else 'no response'} "
+                    "after 3 attempts — ci_session could not be established."
+                )
 
             # Read captcha token from the hidden input (quick, no interaction needed).
             captcha_word = self._resolve_captcha_text(page, prefer_solver=False)
@@ -408,8 +425,10 @@ class CourtApiService:
                 headers={"X-Requested-With": "XMLHttpRequest", "Referer": self.status_url},
             )
             if response.status == 400 and settings.CAPTCHA_ENABLED:
-                # Retry once with OCR/human-solver captcha token.
-                page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
+                # Retry once with OCR/human-solver captcha token (re-establish session).
+                nav_resp2 = page.goto(self.status_url, wait_until="domcontentloaded", timeout=120000)
+                if nav_resp2 and nav_resp2.status >= 400:
+                    raise RuntimeError(f"Court portal unavailable on captcha retry ({nav_resp2.status})")
                 captcha_word = self._resolve_captcha_text(page, prefer_solver=True)
                 response = page.request.post(
                     self.search_url,
