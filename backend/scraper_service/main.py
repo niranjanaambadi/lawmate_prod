@@ -413,6 +413,30 @@ def scrape_case(case_id: str, x_scraper_secret: str = Header(...)) -> Dict[str, 
         db.close()
 
 
+# ── On-demand: ad-hoc case query by case number (no DB write) ─────────────────
+
+@app.post("/scrape/query")
+def scrape_query(payload: Dict[str, Any], x_scraper_secret: str = Header(...)) -> Dict[str, Any]:
+    """
+    Ad-hoc case status lookup by case_number string (e.g. 'Mat.Appeal 80/2024').
+    Does NOT require the case to exist in the DB and does NOT write back to DB.
+    Used by the case-status-check page on Railway.
+    """
+    _require_secret(x_scraper_secret)
+    case_number = (payload.get("case_number") or "").strip()
+    if not case_number:
+        raise HTTPException(422, "case_number is required")
+
+    from app.services.case_sync_service import CaseSyncService
+    try:
+        case_sync = CaseSyncService()
+        result = case_sync.query_case_status(case_number)
+        return result or {"found": False, "case_number": case_number}
+    except Exception as exc:
+        logger.exception("ad-hoc case query failed: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
 # ── On-demand: advocate cause list for one user ───────────────────────────────
 
 @app.post("/scrape/cause-list")

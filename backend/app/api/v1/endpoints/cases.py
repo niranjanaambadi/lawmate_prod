@@ -448,6 +448,8 @@ def query_case_status(
     db: Session = Depends(get_db),
 ):
     try:
+        if scraper_client_service.is_scraper_remote():
+            return scraper_client_service.scrape_query_by_case_number(payload.case_number)
         return case_sync_service.query_case_status(payload.case_number)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Case status lookup failed: {exc}")

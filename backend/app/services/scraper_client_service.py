@@ -92,6 +92,39 @@ def scrape_case(case_id: str) -> Dict[str, Any]:
         raise RuntimeError(f"Could not reach scraper service: {exc}") from exc
 
 
+# ── Ad-hoc case query by case number (no DB write) ───────────────────────────
+
+def scrape_query_by_case_number(case_number: str) -> Dict[str, Any]:
+    """
+    Calls the Oracle VM's POST /scrape/query endpoint.
+    Used for the case-status-check page — no DB case required, no DB write.
+    Returns the same dict shape as case_sync_service.query_case_status().
+    """
+    url = f"{_base_url()}/scrape/query"
+    timeout = float(settings.SCRAPER_SERVICE_TIMEOUT)
+
+    logger.info("scraper_client: delegating ad-hoc query to Oracle VM — case_number=%s", case_number)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(url, headers=_headers(), json={"case_number": case_number})
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "scraper_client: Oracle VM HTTP error %s for query case_number=%s — %s",
+            exc.response.status_code, case_number, exc.response.text,
+        )
+        raise RuntimeError(
+            f"Scraper service error {exc.response.status_code}: {exc.response.text}"
+        ) from exc
+    except httpx.RequestError as exc:
+        logger.error(
+            "scraper_client: Could not reach Oracle VM for query case_number=%s — %s",
+            case_number, exc,
+        )
+        raise RuntimeError(f"Could not reach scraper service: {exc}") from exc
+
+
 # ── Advocate cause list refresh ───────────────────────────────────────────────
 
 def scrape_cause_list(user_id: str, target_date: str) -> Dict[str, Any]:
