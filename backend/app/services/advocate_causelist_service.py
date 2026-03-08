@@ -76,7 +76,9 @@ def build_advocate_name_param(full_name: str, enrollment_number: str) -> str:
            → "U0FOSkFZJTIwSk9ITlNPTihLJTJGMDAwNjcxJTJGMjAxOCk="
     """
     combined   = f"{full_name.strip().upper()}({enrollment_number.strip()})"
-    url_encoded = quote(combined, safe="")
+    # Parentheses must NOT be percent-encoded — portal expects "NAME(ENROLLMENT)"
+    # with literal ( ) but spaces and slashes encoded.
+    url_encoded = quote(combined, safe="()")
     return base64.b64encode(url_encoded.encode()).decode()
 
 
