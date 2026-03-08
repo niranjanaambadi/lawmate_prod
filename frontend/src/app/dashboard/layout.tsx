@@ -28,7 +28,7 @@ export default function DashboardLayout({
   const [verifyError, setVerifyError] = useState<string | null>(null);
 
   const needsProfileVerification = useMemo(
-    () => Boolean(user && !user.profile_verified_at),
+    () => Boolean(user && !user.profile_verified_at && !user.is_verified),
     [user]
   );
 
