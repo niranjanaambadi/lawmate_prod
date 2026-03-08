@@ -7,22 +7,18 @@ Prefix: /api/v1/causelist
 
 Routes
 ------
-GET  /today              → user's cases listed today
-GET  /relevant           → user's cases in a date range
-GET  /rendered-html      → HTML render for a date (existing cause_list_store)
-GET  /all                → all parsed rows for a date
-POST /sync               → trigger PDF fetch + parse pipeline
-GET  /mine-by-advocate   → rows matching user's advocate name
+GET  /today     → user's tracked cases that appear in today's cause list
+GET  /relevant  → user's tracked cases in a date range
 """
 
 from __future__ import annotations
 
 import re
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # Any kept for _items_for_dates return type
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -68,36 +64,6 @@ class CauseListRelevantResponse(BaseModel):
     to_date: str
     total: int
     days: List[CauseListDayGroup]
-
-
-class CauseListAllItem(BaseModel):
-    id: str
-    case_number: str
-    listing_date: str
-    source: str
-    cause_list_type: Optional[str] = None
-    court_number: Optional[str] = None
-    bench_name: Optional[str] = None
-    item_no: Optional[str] = None
-    party_names: Optional[str] = None
-    petitioner_name: Optional[str] = None
-    respondent_name: Optional[str] = None
-    advocate_names: Optional[str] = None
-    fetched_from_url: Optional[str] = None
-
-
-class CauseListAllResponse(BaseModel):
-    listing_date: str
-    source: str
-    total: int
-    items: List[CauseListAllItem]
-
-
-class CauseListRenderedHtmlResponse(BaseModel):
-    listing_date: str
-    source: str
-    total: int
-    html: str
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -238,35 +204,6 @@ def _build_relevant_response(
     )
 
 
-def _all_items_response(
-    pairs: List[Any],
-    listing_date: date,
-    source: Optional[str],
-) -> CauseListAllResponse:
-    items = [
-        CauseListAllItem(
-            id=str(item.id),
-            case_number=item.normalized_case_number or item.case_number_raw or "",
-            listing_date=cl.listing_date.isoformat(),
-            source=_cl_source_str(cl),
-            cause_list_type=cl.cause_list_type,
-            court_number=cl.court_number,
-            bench_name=cl.bench_name,
-            item_no=item.item_no,
-            party_names=item.party_names,
-            petitioner_name=_first_str(item.petitioner_names) or None,
-            respondent_name=_first_str(item.respondent_names) or None,
-        )
-        for item, cl in pairs
-    ]
-    return CauseListAllResponse(
-        listing_date=listing_date.isoformat(),
-        source=source or "daily",
-        total=len(items),
-        items=items,
-    )
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/today", response_model=CauseListRelevantResponse)
@@ -359,129 +296,3 @@ def get_relevant_cause_list(
     return _build_relevant_response(matched, fd, td)
 
 
-@router.get("/rendered-html", response_model=CauseListRenderedHtmlResponse)
-def get_rendered_html(
-    listing_date: Optional[str] = Query(None),
-    source: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Returns the rendered HTML cause list for the given date (uses stored result_json).
-    """
-    from app.services.cause_list_renderer import cause_list_renderer
-    from app.services.cause_list_store import cause_list_store
-
-    ld = _parse_date(listing_date)
-
-    row = cause_list_store.fetch_result(
-        db, advocate_id=str(current_user.id), listing_date=ld
-    )
-
-    if not row:
-        return CauseListRenderedHtmlResponse(
-            listing_date=ld.isoformat(),
-            source=source or "daily",
-            total=0,
-            html=cause_list_renderer.render_empty(ld.isoformat()),
-        )
-
-    result_json = row.result_json if isinstance(row.result_json, dict) else {}
-    html = cause_list_renderer.render(result_json)
-
-    return CauseListRenderedHtmlResponse(
-        listing_date=ld.isoformat(),
-        source=source or "daily",
-        total=int(row.total_listings or 0),
-        html=html,
-    )
-
-
-@router.get("/all", response_model=CauseListAllResponse)
-def get_all_cause_list(
-    listing_date: Optional[str] = Query(None),
-    source: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Returns all parsed cause list rows for a given date.
-    """
-    ld = _parse_date(listing_date)
-
-    q = (
-        db.query(CauseListCaseItem, CauseList)
-        .join(CauseList, CauseListCaseItem.cause_list_id == CauseList.id)
-        .filter(CauseList.listing_date == ld)
-    )
-    src = _source_enum(source)
-    if src:
-        q = q.filter(CauseList.source == src)
-    pairs = q.all()
-
-    return _all_items_response(pairs, ld, source)
-
-
-@router.post("/sync")
-async def sync_cause_list(
-    source: str = Query("daily"),
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Triggers the daily cause list PDF fetch + parse pipeline in the background.
-    Returns immediately.
-    """
-    from app.api.cause_list import _run_process_job
-
-    listing_date = _today_ist()
-    background_tasks.add_task(_run_process_job, listing_date)
-
-    return [
-        {
-            "source": source,
-            "fetched": 0,
-            "runs": 0,
-            "inserted": 0,
-            "updated": 0,
-            "failed_runs": 0,
-            "listing_dates": [listing_date.isoformat()],
-        }
-    ]
-
-
-@router.get("/mine-by-advocate", response_model=CauseListAllResponse)
-def get_mine_by_advocate(
-    listing_date: Optional[str] = Query(None),
-    source: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Returns cause list items where the user's advocate name appears in the raw data.
-    """
-    ld = _parse_date(listing_date)
-    adv_name = (current_user.khc_advocate_name or "").strip().upper()
-
-    q = (
-        db.query(CauseListCaseItem, CauseList)
-        .join(CauseList, CauseListCaseItem.cause_list_id == CauseList.id)
-        .filter(CauseList.listing_date == ld)
-    )
-    src = _source_enum(source)
-    if src:
-        q = q.filter(CauseList.source == src)
-    pairs = q.all()
-
-    if not adv_name:
-        return _all_items_response(pairs, ld, source)
-
-    filtered = []
-    for item, cl in pairs:
-        raw = item.raw_data or {}
-        advocates_raw = str(raw.get("advocates", "") or "").upper()
-        party_raw = (item.party_names or "").upper()
-        if adv_name in advocates_raw or adv_name in party_raw:
-            filtered.append((item, cl))
-
-    return _all_items_response(filtered, ld, source)

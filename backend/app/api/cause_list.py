@@ -37,7 +37,7 @@ def _parse_date(value: str | None) -> date:
 async def _run_process_job(listing_date: date) -> None:
     """
     Full pipeline runs in the background:
-      1. Fetch PDF to S3  — Playwright (sync/blocking) → asyncio.to_thread
+      1. Fetch PDF to S3  — httpx (sync/blocking) → asyncio.to_thread
       2. Parse + store    — run_daily_cause_list_job (async, own session)
 
     Never blocks the event loop.
@@ -137,24 +137,6 @@ def get_cause_list(
         "total_listings": int(row.total_listings or 0) + len(mediation_listings),
         "date": listing_date.isoformat(),
         "mediation_listings": len(mediation_listings),
-    }
-
-
-@router.post("/cause-list/fetch-daily")
-def fetch_daily_cause_list_pdf_to_s3(
-    max_tabs: int = Query(3, ge=1, le=10),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    _ = current_user
-    stats = daily_pdf_fetch_service.fetch_daily_pdfs_to_s3(db=db, max_tabs=max_tabs)
-    return {
-        "success": True,
-        "source": stats.source,
-        "fetched": stats.fetched,
-        "runs": stats.runs,
-        "failed_runs": stats.failed_runs,
-        "listing_dates": sorted(list(stats.listing_dates or set())),
     }
 
 
