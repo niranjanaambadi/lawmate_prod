@@ -78,7 +78,8 @@ export default function DashboardLayout({
         setVerifyError(null);
         await authApi.confirmProfileVerification(otp.trim(), token);
         await refreshUser();
-        router.refresh();
+        // Hard-navigate so the layout re-evaluates verification status
+        window.location.href = "/dashboard";
       } catch (e) {
         setVerifyError(e instanceof Error ? e.message : "OTP verification failed");
       } finally {
