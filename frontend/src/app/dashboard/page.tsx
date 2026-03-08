@@ -313,7 +313,7 @@ export default function DashboardPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            Welcome back, {user?.khc_advocate_name?.split(" ")[0] || "Advocate"}
+            Welcome back, {user?.khc_advocate_name?.split(" ")?.[0] || "Advocate"}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             {user?.khc_advocate_name}
