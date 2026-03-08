@@ -249,7 +249,7 @@ export default function DashboardPage() {
     ? formatRosterDate(rosterQuery.data.latest?.parsedDate)
     : "Loading latest roster...";
 
-  const todayAtCourt: CauseListDayGroup | null = todayAtCourtQuery.data?.days[0] ?? null;
+  const todayAtCourt: CauseListDayGroup | null = todayAtCourtQuery.data?.days?.[0] ?? null;
   const pendingRows: PendingCaseStatusRow[] = pendingQuery.data ?? [];
   const trackedStatusRows: TrackedCaseStatusRow[] = trackedQuery.data ?? [];
   const reminders: DashboardReminder[] = remindersQuery.data ?? [];
