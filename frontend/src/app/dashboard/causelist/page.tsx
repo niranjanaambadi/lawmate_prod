@@ -56,6 +56,13 @@ function CauseListSkeleton() {
 export default function CauseListPage() {
   const today = useMemo(() => new Date(), []);
   const [selectedDate, setSelectedDate] = useState(toIsoDate(today));
+
+  // Tomorrow in IST — used as max on the date picker so future dates are greyed out
+  const maxDate = useMemo(() => {
+    const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const [y, m, d] = todayIST.split("-").map(Number);
+    return toIsoDate(new Date(y, m - 1, d + 1));
+  }, []);
   const { user, token } = useAuth();
   const { data, loading, error, refetch } = useCauseList(selectedDate);
   const [runningJob, setRunningJob] = useState(false);
@@ -151,6 +158,7 @@ export default function CauseListPage() {
               <input
                 type="date"
                 value={selectedDate}
+                max={maxDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
               />
@@ -163,7 +171,7 @@ export default function CauseListPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
             >
               <RefreshCcw className={`h-4 w-4 ${runningJob ? "animate-spin" : ""}`} />
-              {runningJob ? "Running..." : "Run Daily Job"}
+              {runningJob ? "Refreshing..." : "Refresh"}
             </button>
           </div>
         </div>
