@@ -98,8 +98,15 @@ def scrape_query_by_case_number(case_number: str) -> Dict[str, Any]:
     """
     Calls the Oracle VM's POST /scrape/query endpoint.
     Used for the case-status-check page — no DB case required, no DB write.
+
+    Oracle VM returns raw court data + hearing history parsed from HTML.
+    Railway performs Bedrock enrichment here (credentials are valid on Railway).
     Returns the same dict shape as case_sync_service.query_case_status().
     """
+    from datetime import datetime
+    from app.services.bedrock_case_enrichment_service import bedrock_case_enrichment_service
+    from app.services.case_sync_service import CaseSyncService
+
     url = f"{_base_url()}/scrape/query"
     timeout = float(settings.SCRAPER_SERVICE_TIMEOUT)
 
@@ -108,7 +115,7 @@ def scrape_query_by_case_number(case_number: str) -> Dict[str, Any]:
         with httpx.Client(timeout=timeout) as client:
             resp = client.post(url, headers=_headers(), json={"case_number": case_number})
         resp.raise_for_status()
-        return resp.json()
+        data: Dict[str, Any] = resp.json()
     except httpx.HTTPStatusError as exc:
         logger.error(
             "scraper_client: Oracle VM HTTP error %s for query case_number=%s — %s",
@@ -123,6 +130,57 @@ def scrape_query_by_case_number(case_number: str) -> Dict[str, Any]:
             case_number, exc,
         )
         raise RuntimeError(f"Could not reach scraper service: {exc}") from exc
+
+    # Oracle VM returns _raw_payload so Railway can enrich with Bedrock
+    # (Oracle VM's AWS credentials may be stale; Railway's are always current)
+    raw_payload = data.pop("_raw_payload", None)
+    if not data.get("found"):
+        return data
+
+    if raw_payload:
+        enriched = bedrock_case_enrichment_service.enrich_case_data(raw_payload)
+        case_sync = CaseSyncService()
+        hearing_history = data.get("hearing_history") or enriched.get("hearing_history")
+        return {
+            "found": True,
+            "case_number": case_number,
+            "case_type": enriched.get("case_type"),
+            "filing_number": enriched.get("filing_number"),
+            "filing_date": enriched.get("filing_date"),
+            "registration_number": enriched.get("registration_number"),
+            "registration_date": enriched.get("registration_date"),
+            "cnr_number": enriched.get("cnr_number"),
+            "efile_number": enriched.get("efile_number"),
+            "first_hearing_date": enriched.get("first_hearing_date"),
+            "status_text": enriched.get("court_status"),
+            "coram": enriched.get("coram"),
+            "stage": enriched.get("bench"),
+            "last_order_date": enriched.get("last_hearing_date"),
+            "next_hearing_date": enriched.get("next_hearing_date"),
+            "last_listed_date": enriched.get("last_listed_date"),
+            "last_listed_bench": enriched.get("last_listed_bench"),
+            "last_listed_list": enriched.get("last_listed_list"),
+            "last_listed_item": enriched.get("last_listed_item"),
+            "petitioner_name": enriched.get("petitioner"),
+            "petitioner_advocates": enriched.get("petitioner_advocates"),
+            "respondent_name": enriched.get("respondent"),
+            "respondent_advocates": enriched.get("respondent_advocates"),
+            "served_on": enriched.get("served_on"),
+            "acts": enriched.get("acts"),
+            "sections": enriched.get("sections"),
+            "hearing_history": hearing_history,
+            "interim_orders": enriched.get("interim_orders"),
+            "category_details": enriched.get("category_details"),
+            "objections": enriched.get("objections"),
+            "summary": enriched.get("raw_summary"),
+            "source_url": data.get("source_url", ""),
+            "full_details_url": data.get("full_details_url"),
+            "fetched_at": datetime.utcnow(),
+            "message": "Case status fetched",
+        }
+
+    # Fallback: Oracle VM returned pre-enriched result (old behaviour)
+    return data
 
 
 # ── Advocate cause list refresh ───────────────────────────────────────────────

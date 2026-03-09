@@ -421,17 +421,36 @@ def scrape_query(payload: Dict[str, Any], x_scraper_secret: str = Header(...)) -
     Ad-hoc case status lookup by case_number string (e.g. 'Mat.Appeal 80/2024').
     Does NOT require the case to exist in the DB and does NOT write back to DB.
     Used by the case-status-check page on Railway.
+
+    Returns raw court data + pre-parsed hearing history.
+    Railway is responsible for Bedrock enrichment (its AWS credentials are valid).
     """
     _require_secret(x_scraper_secret)
     case_number = (payload.get("case_number") or "").strip()
     if not case_number:
         raise HTTPException(422, "case_number is required")
 
+    from app.services.court_api_service import court_api_service
     from app.services.case_sync_service import CaseSyncService
     try:
+        raw = court_api_service.fetch_case_status(case_number)
+        if not raw:
+            return {"found": False, "case_number": case_number}
+
         case_sync = CaseSyncService()
-        result = case_sync.query_case_status(case_number)
-        return result or {"found": False, "case_number": case_number}
+        hearing_history = case_sync._extract_hearing_history_from_raw(raw)
+        full_details_url = case_sync._build_full_details_url(raw)
+
+        return {
+            "found": True,
+            "case_number": case_number,
+            "_raw_payload": _json_safe(raw),
+            "hearing_history": hearing_history or None,
+            "full_details_url": full_details_url,
+            "source_url": str(raw.get("source") or ""),
+            "fetched_at": datetime.utcnow().isoformat(),
+            "message": "Case status fetched",
+        }
     except Exception as exc:
         logger.exception("ad-hoc case query failed: %s", exc)
         raise HTTPException(500, str(exc))
