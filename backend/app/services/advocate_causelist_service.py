@@ -41,6 +41,11 @@ from app.db.models import AdvocateCauseList, AdvocateCauseListFetchStatus
 
 logger = logging.getLogger(__name__)
 
+# Matches a Kerala HC case number fragment, e.g. "7749/ 2023", "1234/2022".
+# Used in _parse_table() to auto-detect whether the portal has dropped its
+# separate "Judge Name" column (new 7-column layout) vs the old 8-column layout.
+_CASE_NO_RE = re.compile(r"\d{3,}\s*/\s*\d{4}")
+
 BASE_URL    = "https://hckinfo.keralacourts.in"
 API_URL     = f"{BASE_URL}/digicourt/index.php/Casedetailssearch/Casebyadv1"
 SEARCH_PAGE = f"{BASE_URL}/digicourt/Casedetailssearch/Advocatesearch"
@@ -354,10 +359,24 @@ async def _fetch(enc_name: str, target_date: date, adv_cd: str) -> list[dict]:
 
 def _parse_table(html: str, target_date: date) -> list[dict]:
     """
-    Parses the response HTML table.
+    Parses the response HTML table from hckinfo.keralacourts.in/digicourt.
 
-    Expected columns (Kerala HC digicourt):
-      Item No | Court Hall | Bench | List Type | Judge Name | Case No | Petitioner | Respondent
+    The KHC portal has two known column layouts.  We auto-detect which one
+    is in use by inspecting column 4 (0-indexed):
+
+    OLD 8-column format:
+      [0] Item No | [1] Court Hall | [2] Bench | [3] List Type
+      | [4] Judge Name | [5] Case No | [6] Petitioner | [7] Respondent
+
+    NEW 7-column format (Judge Name merged into the Bench cell):
+      [0] Item No | [1] Court Hall | [2] Bench | [3] List Type
+      | [4] Case No | [5] Petitioner | [6] Respondent
+
+    Detection: if column 4 matches a case-number pattern (digits / 4-digit year,
+    e.g. "7749/ 2023") the new layout is assumed.
+
+    All string fields are hard-truncated before insertion as a safety net against
+    future portal changes widening any column beyond what the DB allows.
     """
     soup  = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
@@ -379,26 +398,37 @@ def _parse_table(html: str, target_date: date) -> list[dict]:
 
         texts = [c.get_text(separator=" ", strip=True) for c in cols]
 
-        item_no_raw       = texts[0] if len(texts) > 0 else ""
-        court_hall        = texts[1] if len(texts) > 1 else ""
-        bench             = texts[2] if len(texts) > 2 else ""
-        list_type         = texts[3] if len(texts) > 3 else ""
-        judge_name        = texts[4] if len(texts) > 4 else ""
-        case_no           = texts[5] if len(texts) > 5 else ""
-        petitioner        = texts[6] if len(texts) > 6 else ""
-        respondent        = texts[7] if len(texts) > 7 else ""
+        item_no_raw = texts[0] if len(texts) > 0 else ""
+        court_hall  = texts[1] if len(texts) > 1 else ""
+        bench       = texts[2] if len(texts) > 2 else ""
+        list_type   = texts[3] if len(texts) > 3 else ""
+        t4          = texts[4] if len(texts) > 4 else ""
+
+        # Auto-detect column layout
+        if _CASE_NO_RE.search(t4):
+            # NEW format: Case No at index 4 (Judge Name merged into Bench)
+            judge_name = None
+            case_no    = t4
+            petitioner = texts[5] if len(texts) > 5 else ""
+            respondent = texts[6] if len(texts) > 6 else ""
+        else:
+            # OLD format: Judge Name at index 4
+            judge_name = t4
+            case_no    = texts[5] if len(texts) > 5 else ""
+            petitioner = texts[6] if len(texts) > 6 else ""
+            respondent = texts[7] if len(texts) > 7 else ""
 
         result.append({
-            "date":             target_date,
-            "item_no":          _parse_int(item_no_raw),
-            "court_hall":       court_hall or None,
+            "date":              target_date,
+            "item_no":           _parse_int(item_no_raw),
+            "court_hall":        (court_hall[:255]  if court_hall  else None),
             "court_hall_number": _extract_court_hall_number(court_hall),
-            "bench":            bench or None,
-            "list_type":        list_type or None,
-            "judge_name":       judge_name or None,
-            "case_no":          case_no or None,
-            "petitioner":       (petitioner[:500] if petitioner else None),
-            "respondent":       (respondent[:500] if respondent else None),
+            "bench":             (bench[:499]       if bench       else None),
+            "list_type":         (list_type[:100]   if list_type   else None),
+            "judge_name":        (judge_name[:255]  if judge_name  else None),
+            "case_no":           (case_no[:499]     if case_no     else None),
+            "petitioner":        (petitioner[:1000] if petitioner  else None),
+            "respondent":        (respondent[:1000] if respondent  else None),
         })
 
     return result
