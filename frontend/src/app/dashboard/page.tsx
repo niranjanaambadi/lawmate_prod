@@ -64,9 +64,16 @@ function formatDateShort(value: string | null | undefined): string {
 }
 
 function tomorrowIST(): string {
-  const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  now.setDate(now.getDate() + 1);
-  return now.toISOString().slice(0, 10);
+  // Get today in IST via en-CA (gives YYYY-MM-DD), add 1 day via local calendar
+  // math. Avoids toISOString() which returns UTC and can be a day off vs IST.
+  const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const [y, m, d] = todayIST.split("-").map(Number);
+  const t = new Date(y, m - 1, d + 1);
+  return [
+    t.getFullYear(),
+    String(t.getMonth() + 1).padStart(2, "0"),
+    String(t.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 function formatDisplayDate(iso: string): string {

@@ -54,8 +54,10 @@ function CauseListSkeleton() {
 }
 
 export default function CauseListPage() {
-  const today = useMemo(() => new Date(), []);
-  const [selectedDate, setSelectedDate] = useState(toIsoDate(today));
+  // Default to today in IST (not browser local timezone)
+  const [selectedDate, setSelectedDate] = useState(
+    () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+  );
 
   // Tomorrow in IST — used as max on the date picker so future dates are greyed out
   const maxDate = useMemo(() => {
