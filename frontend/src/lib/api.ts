@@ -421,9 +421,11 @@ export async function refreshAdvocateCauseList(
   targetDate?: string,
 ): Promise<AdvocateCauseListResponse> {
   const suffix = targetDate ? `?target_date=${targetDate}` : "";
+  // 90 s — the chain (Railway → Oracle VM → hckinfo) can take up to 25 s
+  // for the hckinfo call alone; the default 30 s is too tight.
   return apiRequest<AdvocateCauseListResponse>(
     `/api/v1/advocate-cause-list/refresh${suffix}`,
-    { token, method: "POST" },
+    { token, method: "POST", timeoutMs: 90_000 },
   );
 }
 
