@@ -315,6 +315,10 @@ async def fetch_and_store_advocate_causelist(
 async def _fetch(enc_name: str, target_date: date, adv_cd: str) -> list[dict]:
     """
     POSTs to the Casebyadv1 endpoint and parses the HTML table response.
+
+    The portal (CodeIgniter) requires a ci_session cookie established by a
+    prior GET to the search page before it will accept the POST — same pattern
+    as the case-number lookup.  Without the GET first, it returns 400.
     """
     form_data = {
         "advocate_name": enc_name,
@@ -327,7 +331,18 @@ async def _fetch(enc_name: str, target_date: date, adv_cd: str) -> list[dict]:
         timeout=TIMEOUT,
         follow_redirects=True,
     ) as client:
-        resp = await client.post(API_URL, data=form_data)
+        # Step 1: GET search page — sets ci_session in client.cookies
+        await client.get(SEARCH_PAGE)
+        # Step 2: POST with session cookie carried automatically
+        resp = await client.post(
+            API_URL,
+            data=form_data,
+            headers={
+                **HEADERS,
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": SEARCH_PAGE,
+            },
+        )
         resp.raise_for_status()
 
     return _parse_table(resp.text, target_date)
