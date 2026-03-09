@@ -1,11 +1,11 @@
 "use client";
 
-import { CauseListContent } from "@/components/causelist/CauseListContent";
+import { AdvocateCauseListTable } from "@/components/causelist/AdvocateCauseListTable";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCauseList } from "@/hooks/useCauseList";
-import { runCauseListJobForDate } from "@/lib/api";
+import { refreshAdvocateCauseList } from "@/lib/api";
 import { AlertCircle, Building2, CalendarDays, Gavel, RefreshCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import ChatWidget from "@/components/agent/ChatWidget";
 
 function toIsoDate(value: Date): string {
@@ -31,21 +31,15 @@ function CauseListSkeleton() {
       <div className="mb-4 h-4 w-72 rounded bg-slate-100" />
       <div className="overflow-hidden rounded-xl border border-slate-200">
         <div className="grid grid-cols-6 gap-2 bg-slate-50 px-4 py-3">
-          <div className="h-3 rounded bg-slate-200" />
-          <div className="h-3 rounded bg-slate-200" />
-          <div className="h-3 rounded bg-slate-200" />
-          <div className="h-3 rounded bg-slate-200" />
-          <div className="h-3 rounded bg-slate-200" />
-          <div className="h-3 rounded bg-slate-200" />
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="h-3 rounded bg-slate-200" />
+          ))}
         </div>
         {[1, 2, 3].map((row) => (
           <div key={row} className="grid grid-cols-6 gap-2 border-t border-slate-100 px-4 py-4">
-            <div className="h-3 rounded bg-slate-100" />
-            <div className="h-3 rounded bg-slate-100" />
-            <div className="h-3 rounded bg-slate-100" />
-            <div className="h-3 rounded bg-slate-100" />
-            <div className="h-3 rounded bg-slate-100" />
-            <div className="h-3 rounded bg-slate-100" />
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="h-3 rounded bg-slate-100" />
+            ))}
           </div>
         ))}
       </div>
@@ -54,12 +48,12 @@ function CauseListSkeleton() {
 }
 
 export default function CauseListPage() {
-  // Default to today in IST (not browser local timezone)
+  // Default to today in IST
   const [selectedDate, setSelectedDate] = useState(
     () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
   );
 
-  // Tomorrow in IST — used as max on the date picker so future dates are greyed out
+  // Tomorrow in IST — max selectable date
   const maxDate = useMemo(() => {
     const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     const [y, m, d] = todayIST.split("-").map(Number);
@@ -67,83 +61,47 @@ export default function CauseListPage() {
   }, []);
 
   const { user, token } = useAuth();
-  const { data, loading, error, refetch } = useCauseList(selectedDate);
+  const { data, loading, error, refetch, setData } = useCauseList(selectedDate);
+
   const [runningJob, setRunningJob] = useState(false);
   const [jobMessage, setJobMessage] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
-  const [pollSeconds, setPollSeconds] = useState(0);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollCountRef = useRef(0);
-  const POLL_INTERVAL_MS = 5000;
-  const MAX_POLLS = 36; // 3 minutes
 
   const selectedDateObj = useMemo(() => {
     const [y, m, d] = selectedDate.split("-").map(Number);
     return new Date(y, (m || 1) - 1, d || 1);
   }, [selectedDate]);
 
-  const totalListings = data?.total_listings ?? 0;
+  const totalListings = data?.total ?? 0;
   const isEmpty = !loading && !error && totalListings === 0;
-  const hasContent = !loading && !error && totalListings > 0 && Boolean(data?.html);
+  const hasContent = !loading && !error && totalListings > 0;
 
-  // Stop polling when data arrives or component unmounts
-  const stopPolling = () => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-    pollCountRef.current = 0;
-    setPollSeconds(0);
-  };
-
-  useEffect(() => {
-    if (totalListings > 0 && pollIntervalRef.current) {
-      stopPolling();
-      setRunningJob(false);
-      setJobMessage("Cause list loaded successfully.");
-    }
-  }, [totalListings]);
-
-  useEffect(() => () => stopPolling(), []);
-
+  // Refresh: live-fetch from hckinfo via Oracle VM, then update data directly.
+  // No polling needed — the endpoint is synchronous (waits for the scraper).
   const runJob = async () => {
     if (!token) return;
     setRunningJob(true);
     setJobMessage(null);
     setJobError(null);
-    stopPolling();
-    pollCountRef.current = 0;
-
     try {
-      await runCauseListJobForDate(selectedDate, token);
-      setJobMessage("Job started in background — results will appear automatically.");
-
-      // Poll refetch every 5 s for up to 3 minutes
-      let elapsed = 0;
-      pollIntervalRef.current = setInterval(async () => {
-        pollCountRef.current += 1;
-        elapsed += POLL_INTERVAL_MS / 1000;
-        setPollSeconds(elapsed);
-
-        await refetch();
-
-        if (pollCountRef.current >= MAX_POLLS) {
-          stopPolling();
-          setRunningJob(false);
-          setJobMessage(
-            "Job is still running in the background — refresh the page in a few minutes."
-          );
-        }
-      }, POLL_INTERVAL_MS);
+      const res = await refreshAdvocateCauseList(token, selectedDate);
+      setData(res);
+      setJobMessage(
+        res.total > 0
+          ? `Fetched ${res.total} listing${res.total === 1 ? "" : "s"} from hckinfo.`
+          : "No listings found for this date on hckinfo."
+      );
     } catch (err) {
+      setJobError(err instanceof Error ? err.message : "Failed to refresh cause list.");
+    } finally {
       setRunningJob(false);
-      setJobError(err instanceof Error ? err.message : "Failed to start daily cause list job.");
     }
   };
 
   return (
     <>
       <div className="space-y-6">
+        {/* Header */}
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -177,7 +135,7 @@ export default function CauseListPage() {
                 className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <RefreshCcw className={`h-4 w-4 ${runningJob ? "animate-spin" : ""}`} />
-                {runningJob ? `Refreshing... (${pollSeconds}s)` : "Refresh"}
+                {runningJob ? "Fetching..." : "Refresh"}
               </button>
             </div>
           </div>
@@ -195,6 +153,7 @@ export default function CauseListPage() {
           )}
         </section>
 
+        {/* Listing count badge */}
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           {!loading && !error && totalListings > 0 ? (
             <div className="flex items-center gap-2 text-sm text-slate-700">
@@ -208,8 +167,10 @@ export default function CauseListPage() {
           )}
         </section>
 
+        {/* Loading */}
         {loading && <CauseListSkeleton />}
 
+        {/* Error */}
         {!loading && error && (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 shadow-sm">
             <div className="flex items-start gap-3">
@@ -230,20 +191,27 @@ export default function CauseListPage() {
           </div>
         )}
 
+        {/* Empty */}
         {isEmpty && (
           <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
             <div className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-600">
               <Gavel className="h-7 w-7" />
             </div>
-            <h2 className="text-lg font-semibold text-slate-900">No listings today</h2>
+            <h2 className="text-lg font-semibold text-slate-900">No listings found</h2>
             <p className="mt-2 text-sm text-slate-600">
-              You have no cases listed for this date. Check back tomorrow.
+              No cases found for this date. Click <strong>Refresh</strong> to fetch live data from hckinfo.
             </p>
           </div>
         )}
 
-        {hasContent && data?.html && <CauseListContent html={data.html} />}
+        {/* Results table */}
+        {hasContent && data?.rows && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm overflow-hidden">
+            <AdvocateCauseListTable rows={data.rows} />
+          </div>
+        )}
       </div>
+
       <ChatWidget page="global" />
     </>
   );
