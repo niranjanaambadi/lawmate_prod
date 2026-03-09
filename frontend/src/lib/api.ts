@@ -1,7 +1,17 @@
-const getBaseUrl = () =>
-  typeof window !== "undefined"
-    ? process.env.NEXT_PUBLIC_API_URL || ""
-    : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const getBaseUrl = () => {
+  const url = process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") {
+    if (!url) {
+      console.error(
+        "[api] NEXT_PUBLIC_API_URL is not set. " +
+        "Ensure it is configured in Vercel for all environments (Production, Preview, Development) " +
+        "and that the deployment was built after the variable was added."
+      );
+    }
+    return url || "";
+  }
+  return url || "http://localhost:8000";
+};
 
 const API_TIMEOUT_MS = 30000;
 
@@ -48,6 +58,12 @@ export async function apiRequest<T = unknown>(
 ): Promise<T> {
   const { token, timeoutMs, ...init } = options;
   const baseUrl = getBaseUrl().replace(/\/$/, "");
+  if (!baseUrl && !endpoint.startsWith("http")) {
+    throw new Error(
+      "API URL is not configured. " +
+      "Set NEXT_PUBLIC_API_URL in Vercel for all environments and redeploy."
+    );
+  }
   const url = endpoint.startsWith("http") ? endpoint : `${baseUrl}${endpoint}`;
   const tabId = getTabIdHeader();
   const headers: HeadersInit = {
