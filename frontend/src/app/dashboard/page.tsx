@@ -1,5 +1,6 @@
 "use client";
 
+import { AdvocateCauseListTable } from "@/components/causelist/AdvocateCauseListTable";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -24,7 +25,6 @@ import {
   refreshAdvocateCauseList,
   refreshAllPendingStatuses,
   refreshOnePendingStatus,
-  type AdvocateCauseListRow,
   type AdvocateCauseListResponse,
   type CauseListDayGroup,
   type PendingCaseStatusRow,
@@ -574,68 +574,7 @@ export default function DashboardPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="pb-3 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Item No
-                    </th>
-                    <th className="pb-3 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Court Hall
-                    </th>
-                    <th className="pb-3 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Bench
-                    </th>
-                    <th className="pb-3 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      List Type
-                    </th>
-                    <th className="pb-3 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Judge
-                    </th>
-                    <th className="pb-3 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Case No
-                    </th>
-                    <th className="pb-3 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Petitioner
-                    </th>
-                    <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Respondent
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {causeList.rows.map((row: AdvocateCauseListRow) => (
-                    <tr key={row.id} className="group transition-colors hover:bg-slate-50">
-                      <td className="py-3 pr-3">
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-violet-100 text-xs font-semibold text-violet-700">
-                          {row.item_no ?? "-"}
-                        </span>
-                      </td>
-                      <td className="py-3 pr-3 font-medium text-slate-700">
-                        {row.court_hall ?? "-"}
-                      </td>
-                      <td className="py-3 pr-3 text-slate-600">{row.bench ?? "-"}</td>
-                      <td className="py-3 pr-3">
-                        {row.list_type ? (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                            {row.list_type}
-                          </span>
-                        ) : "-"}
-                      </td>
-                      <td className="py-3 pr-3 text-slate-600">{row.judge_name ?? "-"}</td>
-                      <td className="py-3 pr-3 font-medium text-indigo-600">{row.case_no ?? "-"}</td>
-                      <td className="py-3 pr-3 max-w-[10rem] text-slate-600">
-                        <span className="line-clamp-2 text-xs">{row.petitioner ?? "-"}</span>
-                      </td>
-                      <td className="py-3 max-w-[10rem] text-slate-600">
-                        <span className="line-clamp-2 text-xs">{row.respondent ?? "-"}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <AdvocateCauseListTable rows={causeList.rows} />
           )}
         </CardContent>
       </Card>
