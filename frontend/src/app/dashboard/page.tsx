@@ -301,24 +301,24 @@ export default function DashboardPage() {
         </Link>
 
         {/* ── Reminders (interactive content — overlay link + z-index layers) ── */}
-        <div className="group relative flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 ease-out hover:-translate-y-1.5 hover:border-amber-200 hover:shadow-xl hover:shadow-amber-100/60">
+        <div className="group relative flex flex-col rounded-2xl border border-stone-200 bg-white shadow-sm transition-all duration-200 ease-out hover:-translate-y-1.5 hover:border-stone-300 hover:shadow-xl hover:shadow-stone-200/60">
           {/* Background nav overlay — sits below interactive elements */}
           <Link href="/dashboard/calendar" className="absolute inset-0 z-0 rounded-2xl" aria-label="Open Reminders" />
           <div className="relative z-10 flex flex-1 flex-col p-5">
             <div className="mb-4 flex items-start justify-between">
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md shadow-amber-200/60">
+              <div className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-amber-700 to-stone-700 text-white shadow-md shadow-stone-300/60">
                 <BellRing className="h-5 w-5" />
               </div>
               <button
                 type="button"
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-medium text-slate-500 shadow-sm transition-colors hover:border-amber-300 hover:text-amber-600"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-stone-200 bg-white text-base font-medium text-stone-500 shadow-sm transition-colors hover:border-amber-700 hover:text-amber-800"
                 onClick={() => setShowReminderForm((prev) => !prev)}
                 title={showReminderForm ? "Close" : "Add reminder"}
               >
                 {showReminderForm ? "−" : "+"}
               </button>
             </div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-amber-500">Reminders</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-amber-800">Reminders</p>
             <h3 className="mt-0.5 font-semibold text-slate-900">Upcoming Reminders</h3>
 
             {showReminderForm && (
@@ -327,16 +327,16 @@ export default function DashboardPage() {
                   value={newReminderTitle}
                   onChange={(e) => setNewReminderTitle(e.target.value)}
                   placeholder="Add reminder..."
-                  className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="h-9 w-full rounded-lg border border-stone-200 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-800"
                 />
                 <div className="flex gap-2">
                   <input
                     type="date"
                     value={newReminderDate}
                     onChange={(e) => setNewReminderDate(e.target.value)}
-                    className="h-9 flex-1 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="h-9 flex-1 rounded-lg border border-stone-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-800"
                   />
-                  <Button size="sm" className="h-9 bg-amber-500 hover:bg-amber-600 text-white" onClick={addReminder} disabled={addingReminder || !newReminderTitle.trim()}>
+                  <Button size="sm" className="h-9 bg-amber-800 hover:bg-stone-700 text-white" onClick={addReminder} disabled={addingReminder || !newReminderTitle.trim()}>
                     {addingReminder ? "…" : "Add"}
                   </Button>
                 </div>
@@ -355,7 +355,7 @@ export default function DashboardPage() {
                       <label className="flex cursor-pointer items-start gap-2">
                         <input
                           type="checkbox"
-                          className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 accent-amber-500"
+                          className="mt-0.5 h-3.5 w-3.5 rounded border-stone-300 accent-amber-800"
                           checked={false}
                           onChange={() => completeReminder(item.event_id)}
                           disabled={completingReminderId === item.event_id}
@@ -373,7 +373,7 @@ export default function DashboardPage() {
 
             {remindersError && <p className="mt-1 text-xs text-red-500">{remindersError}</p>}
 
-            <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-amber-600">
+            <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-amber-800">
               Open calendar
               <ArrowRight className="h-3.5 w-3.5 transition-transform duration-150 group-hover:translate-x-0.5" />
             </div>
