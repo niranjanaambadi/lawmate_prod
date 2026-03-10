@@ -33,8 +33,9 @@ function pct(used: number, limit: number): number {
 }
 
 function formatGb(gb: number): string {
-  if (gb < 0.01) return "< 0.01 GB";
-  return `${gb.toFixed(2)} GB`;
+  const n = Number(gb);
+  if (isNaN(n) || n < 0.01) return "< 0.01 GB";
+  return `${n.toFixed(2)} GB`;
 }
 
 function resetDate(periodEnd: string): string {
@@ -273,7 +274,7 @@ export default function SettingsUsagePage() {
                 <ResourceRow
                   label="Storage"
                   icon="💾"
-                  used={stats?.storageUsedGb ?? 0}
+                  used={Number(stats?.storageUsedGb ?? 0)}
                   limit={limits.storageGb}
                   formatValue={formatGb}
                   formatLimit={(v) => `${v} GB`}
