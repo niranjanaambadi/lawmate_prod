@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import { getEarlyBirdStats, type EarlyBirdStats } from "@/lib/api";
 import {
   Brain,
   BookOpenCheck,
@@ -28,14 +29,23 @@ import {
 
 const CHROME_STORE_URL = "https://chromewebstore.google.com/";
 
+const EARLY_BIRD_TOTAL = 100;
+
 export default function MarketingPage() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const [ebStats, setEbStats] = useState<EarlyBirdStats | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated) router.replace("/dashboard");
   }, [isAuthenticated, isLoading, router]);
+
+  useEffect(() => {
+    getEarlyBirdStats()
+      .then(setEbStats)
+      .catch(() => setEbStats(null));
+  }, []);
 
   if (isLoading) {
     return (
@@ -218,16 +228,72 @@ export default function MarketingPage() {
           <div className="mt-12 flex flex-col items-center">
             <div className="w-full max-w-md rounded-2xl border-2 border-amber-200 bg-white p-8 shadow-lg">
               <div className="text-center">
-                <p className="text-sm font-medium uppercase tracking-wide text-amber-700">
-                  Early bird — first 100 advocates
-                </p>
+
+                {/* Early bird badge */}
+                {ebStats?.earlyBirdAvailable !== false ? (
+                  <p className="text-sm font-medium uppercase tracking-wide text-amber-700">
+                    🎉 Early bird — first 100 advocates
+                  </p>
+                ) : (
+                  <p className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                    Standard plan
+                  </p>
+                )}
+
+                {/* Price */}
                 <p className="mt-2 text-4xl font-bold text-slate-900">
-                  ₹1,200
+                  {ebStats?.earlyBirdAvailable !== false ? "₹1,200" : "₹1,500"}
                   <span className="text-lg font-normal text-slate-500">/month</span>
                 </p>
-                <p className="mt-2 text-sm text-slate-500 line-through">
-                  Standard ₹1,500/month
-                </p>
+                {ebStats?.earlyBirdAvailable !== false && (
+                  <p className="mt-1 text-sm text-slate-400 line-through">
+                    Standard ₹1,500/month
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-slate-400">+ 18% GST · first 6 months</p>
+
+                {/* Early bird slot counter */}
+                {(() => {
+                  const taken = ebStats?.earlyBirdSlotsTaken ?? null;
+                  const remaining = ebStats?.earlyBirdSlotsRemaining ?? null;
+                  const pctFull = taken !== null ? Math.round((taken / EARLY_BIRD_TOTAL) * 100) : null;
+                  const isFull = ebStats?.earlyBirdAvailable === false;
+
+                  return (
+                    <div className="mt-5 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                      {taken === null ? (
+                        <div className="h-4 w-3/4 mx-auto animate-pulse rounded-full bg-amber-100" />
+                      ) : isFull ? (
+                        <p className="text-sm font-semibold text-red-600">
+                          All 100 early bird spots have been taken.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between text-xs font-medium text-amber-800 mb-1.5">
+                            <span>{taken} of {EARLY_BIRD_TOTAL} spots taken</span>
+                            <span className="font-bold text-amber-700">
+                              {remaining} left
+                            </span>
+                          </div>
+                          {/* Progress bar */}
+                          <div className="h-2.5 w-full rounded-full bg-amber-100 overflow-hidden">
+                            <div
+                              className="h-2.5 rounded-full bg-amber-500 transition-all duration-700"
+                              style={{ width: `${pctFull}%` }}
+                            />
+                          </div>
+                          <p className="mt-1.5 text-xs text-amber-600">
+                            {remaining! <= 20
+                              ? `⚡ Only ${remaining} spots remaining at this price!`
+                              : `Lock in your early bird price for the first 6 months.`}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Features */}
                 <ul className="mt-6 space-y-2 text-left text-sm text-slate-600">
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
@@ -235,7 +301,7 @@ export default function MarketingPage() {
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
-                    Included usage limit per month
+                    15 cases · 60 documents · 100 AI analyses / month
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
@@ -243,19 +309,20 @@ export default function MarketingPage() {
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
-                    ₹200 top-ups when limit exceeds — as many as you need
+                    ₹200 top-ups when you need more — never auto-charged
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
                     Cancel anytime; no long-term lock-in
                   </li>
                 </ul>
+
                 <Button
                   asChild
                   size="lg"
                   className="mt-8 w-full bg-amber-600 hover:bg-amber-700 text-white"
                 >
-                  <Link href="/signup">Start your 3 day free trial now</Link>
+                  <Link href="/signup">Start your 3-day free trial now</Link>
                 </Button>
               </div>
             </div>

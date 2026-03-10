@@ -52,6 +52,13 @@ api_router.include_router(health.router, prefix="/health", tags=["Health"])
 api_router.include_router(roster.router, prefix="/roster", tags=["Roster"])
 api_router.include_router(notebooks.router, prefix="/notebooks", tags=["Case Notebooks"])
 
+# Public (unauthenticated) endpoints — always registered
+try:
+    from app.api.v1.endpoints import public as public_endpoint
+    api_router.include_router(public_endpoint.router, prefix="/public", tags=["Public"])
+except ImportError:
+    pass
+
 # Include new endpoints if available
 if HAS_NEW_ENDPOINTS:
     api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])

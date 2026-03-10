@@ -1242,6 +1242,20 @@ export async function purchaseTopup(
   return res.data;
 }
 
+// ── Public (no-auth) stats ────────────────────────────────────────────────────
+
+export interface EarlyBirdStats {
+  earlyBirdSlotsTotal: number;
+  earlyBirdSlotsTaken: number;
+  earlyBirdSlotsRemaining: number;
+  earlyBirdAvailable: boolean;
+}
+
+/** Fetches public early-bird slot counts — no token required. */
+export async function getEarlyBirdStats(): Promise<EarlyBirdStats> {
+  return apiRequest<EarlyBirdStats>("/api/v1/public/stats");
+}
+
 export interface ImportedDocument {
   id: string;
   case_id: string;
