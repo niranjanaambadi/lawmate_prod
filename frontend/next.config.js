@@ -9,12 +9,12 @@ const nextConfig = {
     config.resolve.fallback = { ...config.resolve.fallback, canvas: false, fs: false, path: false };
     return config;
   },
-  // 2. Add this for Vercel's default Turbopack build
+  // 2. Turbopack resolveAlias — must be module paths, not booleans (webpack syntax)
+  // Point node-only modules at a no-op stub so client bundles don't break.
   turbopack: {
     resolveAlias: {
-      canvas: false,
-      fs: false,
-      path: false,
+      canvas: { browser: "./src/lib/empty-module.js" },
+      fs:     { browser: "./src/lib/empty-module.js" },
     },
   },
 };
