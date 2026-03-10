@@ -13,8 +13,8 @@ const nextConfig = {
   // Point node-only modules at a no-op stub so client bundles don't break.
   turbopack: {
     resolveAlias: {
-      canvas: { browser: "./src/lib/empty-module.js" },
-      fs:     { browser: "./src/lib/empty-module.js" },
+      canvas: "./src/lib/empty-module.js",
+      fs:     "./src/lib/empty-module.js",
     },
   },
 };
