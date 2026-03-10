@@ -305,7 +305,7 @@ def get_usage_stats(db: Session, user_id: str) -> Dict[str, Any]:
         "plan": plan_name,
         "casesCount": cases_count,
         "documentsCount": documents_count,
-        "storageUsedGb": round(storage_bytes / (1024 ** 3), 4),
+        "storageUsedGb": float(round(storage_bytes / (1024 ** 3), 4)),
         "aiAnalysesUsed": ai_analyses_used,
         "topupsAiAdded": topups_ai,
         "limits": {
