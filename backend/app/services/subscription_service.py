@@ -38,7 +38,7 @@ PLAN_LIMITS: Dict[str, Dict[str, Any]] = {
         "ai_analyses": 5,
     },
     "professional": {
-        "cases": 15,
+        "cases": 20,
         "documents": 60,
         "storage_gb": 30,
         "ai_analyses": 100,

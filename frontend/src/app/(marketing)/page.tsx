@@ -301,7 +301,7 @@ export default function MarketingPage() {
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
-                    15 cases · 60 documents · 100 AI analyses / month
+                    20 cases · 60 documents · 100 AI analyses / month
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
@@ -309,7 +309,7 @@ export default function MarketingPage() {
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />
-                    ₹200 top-ups when you need more — never auto-charged
+                    Unlimited ₹200 top-ups when you need more
                   </li>
                   <li className="flex items-center gap-2">
                     <Scale className="h-4 w-4 shrink-0 text-amber-600" />

@@ -52,7 +52,7 @@ function resetDate(periodEnd: string): string {
 // ---------------------------------------------------------------------------
 // Fallback limits when API hasn't loaded yet (professional/base plan)
 // ---------------------------------------------------------------------------
-const FALLBACK_LIMITS = { cases: 15, documents: 60, storageGb: 30, aiAnalyses: 100 };
+const FALLBACK_LIMITS = { cases: 20, documents: 60, storageGb: 30, aiAnalyses: 100 };
 
 // ---------------------------------------------------------------------------
 // Sub-components
