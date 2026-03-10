@@ -223,7 +223,7 @@ export default function MarketingPage() {
             Transparent pricing
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-slate-600">
-            One plan. Track your usage. Pay-as-you-go top-ups when you need more.
+            One plan. Track your usage. Top-ups when you need more. Cancel anytime.
           </p>
           <div className="mt-12 flex flex-col items-center">
             <div className="w-full max-w-md rounded-2xl border-2 border-amber-200 bg-white p-8 shadow-lg">
