@@ -560,7 +560,16 @@ export default function DashboardPage() {
       <Card>
         <CardHeader className="pb-4">
           <CardTitle>Tracked Cases</CardTitle>
-          <CardDescription>Cases you manually track (stored in tracked_cases)</CardDescription>
+          <CardDescription>
+            Cases you manually track (Add{" "}
+            <a
+              href="https://lawmate-prod-5mk1.vercel.app/dashboard/case-status-check"
+              className="underline hover:text-slate-700"
+            >
+              here
+            </a>
+            )
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {trackedStatusRows.length === 0 ? (
