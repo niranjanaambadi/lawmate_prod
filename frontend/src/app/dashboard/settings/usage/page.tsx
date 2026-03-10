@@ -1,18 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  Chart as ChartJS,
-  ArcElement,
-  Tooltip,
-  Legend,
-} from "chart.js";
-import { Doughnut } from "react-chartjs-2";
+import dynamic from "next/dynamic";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { getSubscriptionUsage, purchaseTopup, type UsageStats } from "@/lib/api";
 
-ChartJS.register(ArcElement, Tooltip, Legend);
+// Lazy-load the chart component with SSR disabled — chart.js requires browser canvas
+const DoughnutChart = dynamic(
+  () =>
+    import("chart.js").then(({ Chart, ArcElement, Tooltip, Legend }) => {
+      Chart.register(ArcElement, Tooltip, Legend);
+      return import("react-chartjs-2").then((mod) => mod.Doughnut);
+    }),
+  { ssr: false, loading: () => <div className="h-[200px] w-full animate-pulse rounded-lg bg-slate-100" /> }
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -159,7 +161,9 @@ export default function SettingsUsagePage() {
     beforeDraw(chart: { ctx: CanvasRenderingContext2D; width: number; height: number }) {
       const { ctx, width, height } = chart;
       ctx.save();
-      ctx.font = `bold ${(height / 90).toFixed(0)}px sans-serif`;
+      if (!ctx) return;
+      const fontSize = Math.max(12, Math.round(height / 9));
+      ctx.font = `bold ${fontSize}px sans-serif`;
       ctx.textBaseline = "middle";
       ctx.textAlign = "center";
       ctx.fillStyle = overallTheme.text;
@@ -228,7 +232,7 @@ export default function SettingsUsagePage() {
               style={{ borderColor: overallTheme.ring + "44", backgroundColor: overallTheme.bg }}
             >
               <div className="relative h-[200px] w-full max-w-[200px]">
-                <Doughnut data={chartData} options={chartOptions} plugins={[centerTextPlugin]} />
+                <DoughnutChart data={chartData} options={chartOptions} plugins={[centerTextPlugin]} />
               </div>
               <p className="mt-3 text-center text-xs text-slate-500">
                 {totalUsed.toLocaleString()} / {totalAllotted.toLocaleString()} weighted units
