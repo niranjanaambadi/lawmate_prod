@@ -37,6 +37,10 @@ class AutoRenewIn(BaseModel):
     auto_renew: bool
 
 
+class PurchaseTopupIn(BaseModel):
+    payment_reference: Optional[str] = None
+
+
 @router.get("/current")
 def get_current_subscription(
     current_user: User = Depends(get_current_user),
@@ -105,3 +109,19 @@ def toggle_auto_renew(
 ) -> Dict[str, Any]:
     subscription_service.toggle_auto_renew(db, current_user.id, payload.auto_renew)
     return {"data": {"message": f"Auto-renewal {'enabled' if payload.auto_renew else 'disabled'}"}}
+
+
+@router.post("/topup")
+def purchase_topup(
+    payload: PurchaseTopupIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Record a ₹200 top-up (+20 AI analyses for the current billing period).
+    In production, only call this after Razorpay payment verification via webhook.
+    """
+    result = subscription_service.purchase_topup(
+        db, str(current_user.id), payload.payment_reference
+    )
+    return {"data": result}

@@ -39,6 +39,7 @@ model User {
 
   subscriptions         Subscription[]
   usageTracking         UsageTracking[]
+  usageTopups           UsageTopup[]
 
   @@index([email, isActive], map: "idx_user_login")
   @@index([khcAdvocateId, isActive], map: "idx_user_khc")
@@ -482,6 +483,22 @@ model UsageTracking {
   @@unique([userId, periodStart])
   @@index([userId, periodEnd], map: "idx_usage_user_period")
   @@map("usage_tracking")
+}
+
+model UsageTopup {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  periodStart       DateTime @map("period_start")
+  aiAnalysesAdded   Int      @default(20) @map("ai_analyses_added")
+  amountPaid        Int      @default(200) @map("amount_paid")
+  currency          String   @default("INR") @db.VarChar(3)
+  paymentReference  String?  @map("payment_reference") @db.VarChar(255)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, periodStart], map: "ix_usage_topups_user_period")
+  @@map("usage_topups")
 }
 
 enum CalendarEventType {

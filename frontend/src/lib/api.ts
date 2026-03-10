@@ -1154,13 +1154,23 @@ export interface SubscriptionCurrent {
   paymentMethod?: string | null;
 }
 
+export interface UsageLimits {
+  cases: number;
+  documents: number;
+  storageGb: number;
+  aiAnalyses: number;  // base plan + top-ups purchased this month
+}
+
 export interface UsageStats {
   periodStart: string;
   periodEnd: string;
+  plan: string;
   casesCount: number;
   documentsCount: number;
   storageUsedGb: number;
   aiAnalysesUsed: number;
+  topupsAiAdded: number;
+  limits: UsageLimits;
 }
 
 export interface InvoiceItem {
@@ -1208,6 +1218,27 @@ export async function getSubscriptionUsage(token: string | null): Promise<UsageS
 
 export async function getSubscriptionInvoices(token: string | null): Promise<InvoiceItem[]> {
   const res = await apiRequest<{ data: InvoiceItem[] }>("/api/v1/subscription/invoices", { token });
+  return res.data;
+}
+
+export interface TopupResult {
+  id: string;
+  aiAnalysesAdded: number;
+  amountPaid: number;
+  currency: string;
+  periodStart: string;
+  createdAt: string;
+}
+
+export async function purchaseTopup(
+  token: string | null,
+  paymentReference?: string
+): Promise<TopupResult> {
+  const res = await apiRequest<{ data: TopupResult }>("/api/v1/subscription/topup", {
+    method: "POST",
+    token,
+    body: JSON.stringify({ payment_reference: paymentReference ?? null }),
+  });
   return res.data;
 }
 

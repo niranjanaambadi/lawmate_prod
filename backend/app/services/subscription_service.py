@@ -9,9 +9,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    AIAnalysis,
+    AIAnalysisStatus,
     Case,
     Document,
     Invoice,
@@ -20,7 +23,40 @@ from app.db.models import (
     Subscription,
     SubscriptionPlan,
     SubscriptionStatus,
+    UsageTracking,
+    UsageTopup,
 )
+
+# ---------------------------------------------------------------------------
+# Plan limits — single source of truth for enforcement + UI display
+# ---------------------------------------------------------------------------
+PLAN_LIMITS: Dict[str, Dict[str, Any]] = {
+    "free": {
+        "cases": 5,
+        "documents": 10,
+        "storage_gb": 1,
+        "ai_analyses": 5,
+    },
+    "professional": {
+        "cases": 15,
+        "documents": 60,
+        "storage_gb": 30,
+        "ai_analyses": 100,
+    },
+    "enterprise": {
+        "cases": 999_999,
+        "documents": 999_999,
+        "storage_gb": 999_999,
+        "ai_analyses": 999_999,
+    },
+}
+
+TOPUP_AI_ANALYSES = 20   # units added per ₹200 top-up
+TOPUP_PRICE_INR   = 200
+
+
+def get_plan_limits(plan_name: str) -> Dict[str, Any]:
+    return PLAN_LIMITS.get(plan_name, PLAN_LIMITS["free"])
 
 
 def _enum_out(value) -> Optional[str]:
@@ -169,43 +205,186 @@ def get_all_plans() -> List[Dict]:
     ]
 
 
-def get_usage_stats(db: Session, user_id: str):
+def get_usage_stats(db: Session, user_id: str) -> Dict[str, Any]:
     """
-    Calculate current usage statistics for current period.
+    Return current-period usage alongside the user's plan limits.
+    AI analyses are read directly from the ai_analyses table (completed, this month).
+    Top-up buckets purchased this month are summed and added to the effective AI limit.
+    A UsageTracking snapshot is upserted for audit / CloudWatch export.
     """
     now = datetime.utcnow()
     period_start = datetime(now.year, now.month, 1)
-    period_end = now
-    
-    # Count cases
-    cases_count = db.query(Case).filter(
-        Case.advocate_id == user_id,
-        Case.is_visible == True
-    ).count()
-    
-    # Count documents
-    documents_count = db.query(Document).join(Case).filter(
-        Case.advocate_id == user_id
-    ).count()
-    
-    # Calculate storage (mock - sum file_size from documents)
-    storage_query = db.query(Document).join(Case).filter(
-        Case.advocate_id == user_id
-    ).all()
-    
-    storage_bytes = sum(doc.file_size for doc in storage_query)
-    # TODO: wire this to actual AI usage tracking
-    ai_analyses_used = 0
 
-    # Return camelCase expected by webapp UI
+    # ── Plan ────────────────────────────────────────────────────────────────
+    sub = (
+        db.query(Subscription)
+        .filter(Subscription.user_id == user_id)
+        .order_by(Subscription.created_at.desc())
+        .first()
+    )
+    plan_name = sub.plan.value if sub else "free"
+    limits = get_plan_limits(plan_name)
+
+    # ── Top-ups purchased this billing period ───────────────────────────────
+    topups_ai: int = (
+        db.query(func.sum(UsageTopup.ai_analyses_added))
+        .filter(
+            UsageTopup.user_id == user_id,
+            UsageTopup.period_start >= period_start,
+        )
+        .scalar()
+    ) or 0
+
+    # ── Cases ───────────────────────────────────────────────────────────────
+    cases_count: int = (
+        db.query(Case)
+        .filter(Case.advocate_id == user_id, Case.is_visible == True)
+        .count()
+    )
+
+    # ── Documents ───────────────────────────────────────────────────────────
+    documents_count: int = (
+        db.query(Document)
+        .join(Case)
+        .filter(Case.advocate_id == user_id)
+        .count()
+    )
+
+    # ── Storage ─────────────────────────────────────────────────────────────
+    storage_bytes: int = (
+        db.query(func.sum(Document.file_size))
+        .join(Case)
+        .filter(Case.advocate_id == user_id)
+        .scalar()
+    ) or 0
+
+    # ── AI Analyses (completed this billing month) ───────────────────────────
+    ai_analyses_used: int = (
+        db.query(AIAnalysis)
+        .filter(
+            AIAnalysis.advocate_id == user_id,
+            AIAnalysis.status == AIAnalysisStatus.completed,
+            AIAnalysis.created_at >= period_start,
+        )
+        .count()
+    )
+
+    # ── Upsert UsageTracking snapshot ────────────────────────────────────────
+    tracking = (
+        db.query(UsageTracking)
+        .filter(
+            UsageTracking.user_id == user_id,
+            UsageTracking.period_start == period_start,
+        )
+        .first()
+    )
+    if tracking:
+        tracking.cases_count = cases_count
+        tracking.documents_count = documents_count
+        tracking.storage_used_bytes = storage_bytes
+        tracking.ai_analyses_used = ai_analyses_used
+        tracking.updated_at = now
+    else:
+        tracking = UsageTracking(
+            user_id=user_id,
+            period_start=period_start,
+            period_end=now,
+            cases_count=cases_count,
+            documents_count=documents_count,
+            storage_used_bytes=storage_bytes,
+            ai_analyses_used=ai_analyses_used,
+        )
+        db.add(tracking)
+    db.commit()
+
+    effective_ai_limit = limits["ai_analyses"] + topups_ai
+
     return {
         "periodStart": period_start,
-        "periodEnd": period_end,
+        "periodEnd": now,
+        "plan": plan_name,
         "casesCount": cases_count,
         "documentsCount": documents_count,
-        # Keep as GB number (webapp displays `storageUsedGb` directly in some places)
-        "storageUsedGb": round(storage_bytes / (1024**3), 4),
+        "storageUsedGb": round(storage_bytes / (1024 ** 3), 4),
         "aiAnalysesUsed": ai_analyses_used,
+        "topupsAiAdded": topups_ai,
+        "limits": {
+            "cases": limits["cases"],
+            "documents": limits["documents"],
+            "storageGb": limits["storage_gb"],
+            "aiAnalyses": effective_ai_limit,
+        },
+    }
+
+
+def check_ai_limit(db: Session, user_id: str) -> bool:
+    """
+    Returns True if the user may still run an AI analysis this month.
+    Checks base plan limit + any purchased top-ups.
+    """
+    now = datetime.utcnow()
+    period_start = datetime(now.year, now.month, 1)
+
+    sub = (
+        db.query(Subscription)
+        .filter(Subscription.user_id == user_id)
+        .order_by(Subscription.created_at.desc())
+        .first()
+    )
+    plan_name = sub.plan.value if sub else "free"
+    base_limit = get_plan_limits(plan_name)["ai_analyses"]
+
+    topups_ai: int = (
+        db.query(func.sum(UsageTopup.ai_analyses_added))
+        .filter(
+            UsageTopup.user_id == user_id,
+            UsageTopup.period_start >= period_start,
+        )
+        .scalar()
+    ) or 0
+
+    ai_used: int = (
+        db.query(AIAnalysis)
+        .filter(
+            AIAnalysis.advocate_id == user_id,
+            AIAnalysis.status == AIAnalysisStatus.completed,
+            AIAnalysis.created_at >= period_start,
+        )
+        .count()
+    )
+
+    return ai_used < (base_limit + topups_ai)
+
+
+def purchase_topup(
+    db: Session, user_id: str, payment_reference: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Record a ₹200 top-up purchase (+20 AI analyses for the current billing period).
+    In production, only call this after Razorpay payment verification.
+    """
+    now = datetime.utcnow()
+    period_start = datetime(now.year, now.month, 1)
+
+    topup = UsageTopup(
+        user_id=user_id,
+        period_start=period_start,
+        ai_analyses_added=TOPUP_AI_ANALYSES,
+        amount_paid=TOPUP_PRICE_INR,
+        currency="INR",
+        payment_reference=payment_reference,
+    )
+    db.add(topup)
+    db.commit()
+    db.refresh(topup)
+
+    return {
+        "id": str(topup.id),
+        "aiAnalysesAdded": topup.ai_analyses_added,
+        "amountPaid": topup.amount_paid,
+        "currency": topup.currency,
+        "periodStart": topup.period_start,
+        "createdAt": topup.created_at,
     }
 
 

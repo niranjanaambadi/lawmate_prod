@@ -228,6 +228,7 @@ class User(Base):
     ai_analyses = relationship("AIAnalysis", back_populates="advocate", cascade="all, delete-orphan")
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
     usage_tracking = relationship("UsageTracking", back_populates="user", cascade="all, delete-orphan")
+    usage_topups = relationship("UsageTopup", back_populates="user", cascade="all, delete-orphan")
     hearing_notes = relationship("HearingNote", back_populates="user", cascade="all, delete-orphan")
     court_session_status = relationship("CourtSessionStatus", back_populates="user", uselist=False, cascade="all, delete-orphan")
     court_fetch_runs = relationship("CourtFetchRun", back_populates="user", cascade="all, delete-orphan")
@@ -831,6 +832,29 @@ class UsageTracking(Base):
 
     user = relationship("User", back_populates="usage_tracking")
 
+
+class UsageTopup(Base):
+    """
+    Records each ₹200 top-up purchase (adds 20 AI analyses to the current billing period).
+    One row per purchase — never auto-charged.
+    """
+    __tablename__ = "usage_topups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    period_start = Column(TIMESTAMP, nullable=False)          # billing month this topup applies to
+    ai_analyses_added = Column(Integer, nullable=False, default=20)
+    amount_paid = Column(Integer, nullable=False, default=200)
+    currency = Column(String(3), nullable=False, default="INR")
+    payment_reference = Column(String(255), nullable=True)    # Razorpay order/payment ID
+
+    created_at = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="usage_topups")
+
+    __table_args__ = (
+        Index("ix_usage_topups_user_period", "user_id", "period_start"),
+    )
 
 
 class CauseListIngestionRun(Base):

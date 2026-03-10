@@ -10,6 +10,7 @@ from app.db.models import AIAnalysis, Case, User
 from app.db.schemas import AIAnalysisResponse
 from app.api.deps import get_current_user
 from app.services.ai_service import ai_service
+from app.services import subscription_service
 
 router = APIRouter()
 
@@ -75,7 +76,20 @@ def trigger_analysis(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized"
         )
-    
+
+    # ── Usage limit gate ────────────────────────────────────────────────────
+    if not subscription_service.check_ai_limit(db, str(current_user.id)):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "ai_limit_reached",
+                "message": "You have used all AI analyses for this month.",
+                "topup_required": True,
+                "topup_price_inr": subscription_service.TOPUP_PRICE_INR,
+                "topup_ai_analyses": subscription_service.TOPUP_AI_ANALYSES,
+            },
+        )
+
     # Trigger analysis (synchronous for now, can be made async with Celery)
     try:
         analysis = ai_service.analyze_case(
