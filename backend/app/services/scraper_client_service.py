@@ -9,9 +9,10 @@ Falls back gracefully to local Playwright when SCRAPER_SERVICE_URL is empty.
 
 Functions
 ---------
-is_scraper_remote()          → True if Oracle VM routing is enabled
-scrape_case(case_id)         → POST /scrape/case/{case_id}  — fetch + DB write on VM
-scrape_cause_list(user_id, date_str) → POST /scrape/cause-list — fetch + DB write on VM
+is_scraper_remote()                        → True if Oracle VM routing is enabled
+scrape_case(case_id)                       → POST /scrape/case/{case_id}  — fetch + DB write on VM
+scrape_cause_list(user_id, date_str)       → POST /scrape/cause-list — fetch + DB write on VM
+scrape_full_cause_list_url(target_date)    → POST /scrape/full-cause-list-url — PDF URL for date
 """
 
 from __future__ import annotations
@@ -235,5 +236,58 @@ def scrape_cause_list(user_id: str, target_date: str) -> Dict[str, Any]:
         logger.error(
             "scraper_client: Could not reach Oracle VM for cause-list user_id=%s — %s",
             user_id, exc,
+        )
+        raise RuntimeError(f"Could not reach scraper service: {exc}") from exc
+
+
+# ── Full daily cause list PDF URL ─────────────────────────────────────────────
+
+def scrape_full_cause_list_url(target_date: str) -> Dict[str, Any]:
+    """
+    Calls the Oracle VM's POST /scrape/full-cause-list-url endpoint.
+
+    The Oracle VM:
+      1. GETs hckinfo viewCauselist (seeds session/cookies)
+      2. POSTs to clistbyDate with the date
+      3. Parses the HTML response to find the "VIEW LATEST ENTIRE LIST (DAILY)" PDF link
+      4. Returns {"ok": True, "pdf_url": "<url>", "date": "<YYYY-MM-DD>"}
+
+    Raises RuntimeError on HTTP or connection errors.
+    """
+    url = f"{_base_url()}/scrape/full-cause-list-url"
+    timeout = float(settings.SCRAPER_SERVICE_TIMEOUT)
+
+    logger.info(
+        "scraper_client: delegating full-cause-list-url to Oracle VM — date=%s",
+        target_date,
+    )
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(
+                url,
+                headers=_headers(),
+                json={"date": target_date},
+            )
+        resp.raise_for_status()
+        data: Dict[str, Any] = resp.json()
+        logger.info(
+            "scraper_client: Oracle VM full-cause-list-url done — date=%s pdf_url=%s",
+            target_date, data.get("pdf_url"),
+        )
+        return data
+
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "scraper_client: Oracle VM HTTP error %s for full-cause-list-url date=%s — %s",
+            exc.response.status_code, target_date, exc.response.text,
+        )
+        raise RuntimeError(
+            f"Scraper service error {exc.response.status_code}: {exc.response.text}"
+        ) from exc
+
+    except httpx.RequestError as exc:
+        logger.error(
+            "scraper_client: Could not reach Oracle VM for full-cause-list-url date=%s — %s",
+            target_date, exc,
         )
         raise RuntimeError(f"Could not reach scraper service: {exc}") from exc

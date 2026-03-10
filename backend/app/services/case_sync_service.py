@@ -32,9 +32,10 @@ class CaseSyncService:
         return "Status unavailable"
 
     def _normalize_header(self, header: str) -> str:
-        key = re.sub(r"\s+", " ", (header or "").strip().lower())
-        key = key.replace("hon:", "hon ").replace("(tentative date)", "tentative date")
-        return key
+        key = (header or "").strip().lower()
+        key = key.replace("hon:", "hon").replace("(tentative date)", "tentative date")
+        # Collapse any double-spaces introduced by replacements, then re-strip
+        return re.sub(r"\s+", " ", key).strip()
 
     def _extract_hearing_history_from_raw(self, raw: Dict[str, Any]) -> List[Dict[str, Any]]:
         payload = raw.get("payload") if isinstance(raw, dict) else None

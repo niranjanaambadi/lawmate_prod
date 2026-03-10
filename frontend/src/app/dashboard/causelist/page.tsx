@@ -3,8 +3,8 @@
 import { AdvocateCauseListTable } from "@/components/causelist/AdvocateCauseListTable";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCauseList } from "@/hooks/useCauseList";
-import { refreshAdvocateCauseList } from "@/lib/api";
-import { AlertCircle, Building2, CalendarDays, Gavel, RefreshCcw } from "lucide-react";
+import { refreshAdvocateCauseList, getFullCauseListPdfUrl } from "@/lib/api";
+import { AlertCircle, Building2, CalendarDays, ExternalLink, Gavel, RefreshCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import ChatWidget from "@/components/agent/ChatWidget";
 
@@ -30,14 +30,14 @@ function CauseListSkeleton() {
       <div className="mb-5 h-5 w-56 rounded bg-slate-200" />
       <div className="mb-4 h-4 w-72 rounded bg-slate-100" />
       <div className="overflow-hidden rounded-xl border border-slate-200">
-        <div className="grid grid-cols-6 gap-2 bg-slate-50 px-4 py-3">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
+        <div className="grid grid-cols-7 gap-2 bg-slate-50 px-4 py-3">
+          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
             <div key={i} className="h-3 rounded bg-slate-200" />
           ))}
         </div>
         {[1, 2, 3].map((row) => (
-          <div key={row} className="grid grid-cols-6 gap-2 border-t border-slate-100 px-4 py-4">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={row} className="grid grid-cols-7 gap-2 border-t border-slate-100 px-4 py-4">
+            {[1, 2, 3, 4, 5, 6, 7].map((i) => (
               <div key={i} className="h-3 rounded bg-slate-100" />
             ))}
           </div>
@@ -67,6 +67,9 @@ export default function CauseListPage() {
   const [jobMessage, setJobMessage] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
 
+  const [fullListLoading, setFullListLoading] = useState(false);
+  const [fullListError, setFullListError] = useState<string | null>(null);
+
   const selectedDateObj = useMemo(() => {
     const [y, m, d] = selectedDate.split("-").map(Number);
     return new Date(y, (m || 1) - 1, d || 1);
@@ -95,6 +98,23 @@ export default function CauseListPage() {
       setJobError(err instanceof Error ? err.message : "Failed to refresh cause list.");
     } finally {
       setRunningJob(false);
+    }
+  };
+
+  // Full list: fetch PDF URL from hckinfo via backend → open in new tab
+  const openFullList = async () => {
+    if (!token) return;
+    setFullListLoading(true);
+    setFullListError(null);
+    try {
+      const res = await getFullCauseListPdfUrl(token, selectedDate);
+      window.open(res.pdf_url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setFullListError(
+        err instanceof Error ? err.message : "Could not fetch full cause list link."
+      );
+    } finally {
+      setFullListLoading(false);
     }
   };
 
@@ -137,8 +157,24 @@ export default function CauseListPage() {
                 <RefreshCcw className={`h-4 w-4 ${runningJob ? "animate-spin" : ""}`} />
                 {runningJob ? "Fetching..." : "Refresh"}
               </button>
+
+              <button
+                type="button"
+                onClick={openFullList}
+                disabled={fullListLoading}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <ExternalLink className={`h-4 w-4 ${fullListLoading ? "animate-pulse" : ""}`} />
+                {fullListLoading ? "Opening..." : "Latest Full Cause List"}
+              </button>
             </div>
           </div>
+
+          {fullListError && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              {fullListError}
+            </div>
+          )}
 
           {(jobMessage || jobError) && (
             <div

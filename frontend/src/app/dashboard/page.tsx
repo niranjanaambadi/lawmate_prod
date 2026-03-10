@@ -1,6 +1,5 @@
 "use client";
 
-import { AdvocateCauseListTable } from "@/components/causelist/AdvocateCauseListTable";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -14,18 +13,14 @@ import {
   Clock3,
   FileText,
   FolderOpen,
-  Gavel,
   RefreshCw,
 } from "lucide-react";
 import {
   getPendingCaseStatuses,
   getTrackedCaseStatuses,
   getTodayAtCourt,
-  getAdvocateCauseList,
-  refreshAdvocateCauseList,
   refreshAllPendingStatuses,
   refreshOnePendingStatus,
-  type AdvocateCauseListResponse,
   type CauseListDayGroup,
   type PendingCaseStatusRow,
   type TrackedCaseStatusRow,
@@ -63,24 +58,6 @@ function formatDateShort(value: string | null | undefined): string {
   return d.toLocaleDateString();
 }
 
-function tomorrowIST(): string {
-  // Get today in IST via en-CA (gives YYYY-MM-DD), add 1 day via local calendar
-  // math. Avoids toISOString() which returns UTC and can be a day off vs IST.
-  const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  const [y, m, d] = todayIST.split("-").map(Number);
-  const t = new Date(y, m - 1, d + 1);
-  return [
-    t.getFullYear(),
-    String(t.getMonth() + 1).padStart(2, "0"),
-    String(t.getDate()).padStart(2, "0"),
-  ].join("-");
-}
-
-function formatDisplayDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-}
 
 export default function DashboardPage() {
   const { user, token } = useAuth();
@@ -105,8 +82,6 @@ export default function DashboardPage() {
     d.setDate(d.getDate() + 30);
     return d.toISOString().slice(0, 10);
   }, []);
-  const causeListDate = useMemo(() => tomorrowIST(), []);
-
   // Clock ticker
   useEffect(() => {
     const timer = setInterval(() => setClockNow(new Date()), 1000);
@@ -165,14 +140,6 @@ export default function DashboardPage() {
     staleTime: 2 * 60 * 1000,
   });
 
-  const causeListQuery = useQuery<AdvocateCauseListResponse>({
-    queryKey: ["causeList", token, causeListDate],
-    queryFn: () => getAdvocateCauseList(token!, causeListDate),
-    enabled: !!token,
-    staleTime: 10 * 60 * 1000,
-    retry: false,
-  });
-
   // ── Mutations ──────────────────────────────────────────────────────────────
   const addReminderMutation = useMutation({
     mutationFn: async () => {
@@ -219,13 +186,6 @@ export default function DashboardPage() {
     },
   });
 
-  const refreshCauseListMutation = useMutation({
-    mutationFn: () => refreshAdvocateCauseList(token!, causeListDate),
-    onSuccess: (data) => {
-      queryClient.setQueryData(["causeList", token, causeListDate], data);
-    },
-  });
-
   const refreshAllMutation = useMutation({
     mutationFn: () => refreshAllPendingStatuses(token!),
     onSuccess: (result) => {
@@ -261,11 +221,8 @@ export default function DashboardPage() {
   const trackedStatusRows: TrackedCaseStatusRow[] = trackedQuery.data ?? [];
   const reminders: DashboardReminder[] = remindersQuery.data ?? [];
   const remindersLoading = remindersQuery.isLoading;
-  const causeList: AdvocateCauseListResponse | null = causeListQuery.data ?? null;
-  const causeListLoading = causeListQuery.isLoading;
 
   const refreshAllLoading = refreshAllMutation.isPending;
-  const causeListRefreshing = refreshCauseListMutation.isPending;
   const addingReminder = addReminderMutation.isPending;
   const completingReminderId = completeReminderMutation.isPending
     ? (completeReminderMutation.variables as string)
@@ -273,13 +230,6 @@ export default function DashboardPage() {
   const rowRefreshingId = refreshOneRowMutation.isPending
     ? (refreshOneRowMutation.variables as string)
     : null;
-
-  const causeListError: string | null = (() => {
-    const err = causeListQuery.error ?? refreshCauseListMutation.error;
-    if (!err) return null;
-    const msg = err instanceof Error ? err.message : String(err);
-    return msg.includes("KHC") ? null : msg;
-  })();
 
   const remindersError: string | null = (() => {
     const err =
@@ -296,11 +246,6 @@ export default function DashboardPage() {
   const completeReminder = (eventId: string) => {
     if (!token || completeReminderMutation.isPending) return;
     completeReminderMutation.mutate(eventId);
-  };
-
-  const handleRefreshCauseList = () => {
-    if (!token || causeListRefreshing) return;
-    refreshCauseListMutation.mutate();
   };
 
   const handleRefreshAll = () => {
@@ -521,63 +466,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* ── Advocate Cause List ──────────────────────────────────────────── */}
-      <Card>
-        <CardHeader className="pb-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
-                <Gavel className="h-4 w-4" />
-              </div>
-              <div>
-                <CardTitle>Tomorrow&apos;s Cause List</CardTitle>
-                <CardDescription>
-                  {causeListLoading
-                    ? "Loading…"
-                    : causeList
-                    ? `${causeList.total} listing${causeList.total !== 1 ? "s" : ""} · ${formatDisplayDate(causeList.date)}`
-                    : "Your cases listed for tomorrow at Kerala High Court"}
-                </CardDescription>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefreshCauseList}
-              disabled={causeListRefreshing || causeListLoading}
-              title="Fetch fresh data from hckinfo"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${causeListRefreshing ? "animate-spin" : ""}`} />
-              {causeListRefreshing ? "Fetching…" : "Refresh"}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {causeListError && (
-            <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-              {causeListError}
-            </p>
-          )}
-
-          {causeListLoading ? (
-            <div className="flex items-center justify-center py-10">
-              <RefreshCw className="h-5 w-5 animate-spin text-slate-300" />
-            </div>
-          ) : !causeList || causeList.total === 0 ? (
-            <div className="flex flex-col items-center justify-center py-10 text-center">
-              <Gavel className="mb-2 h-8 w-8 text-slate-200" />
-              <p className="text-sm text-slate-500">
-                {causeList
-                  ? "No listings found for tomorrow. Click Refresh to fetch from hckinfo."
-                  : "Set your KHC enrollment number and advocate code in your profile to enable this feature."}
-              </p>
-            </div>
-          ) : (
-            <AdvocateCauseListTable rows={causeList.rows} />
-          )}
-        </CardContent>
-      </Card>
 
       {/* Status Updates — pending cases with latest hearing history */}
       <Card>

@@ -507,6 +507,126 @@ async def scrape_cause_list(
         db.close()
 
 
+# ── On-demand: full daily cause list PDF URL (for a given date) ───────────────
+
+@app.post("/scrape/full-cause-list-url")
+def scrape_full_cause_list_url(
+    payload: Dict[str, Any],
+    x_scraper_secret: str = Header(...),
+) -> Dict[str, Any]:
+    """
+    Fetches the full daily cause list PDF URL from hckinfo for a given date.
+
+    Steps:
+      1. GET viewCauselist page (establish session / cookies)
+      2. POST to clistbyDate with the requested date
+      3. Parse response HTML for the "VIEW LATEST ENTIRE LIST (DAILY)" PDF link
+      4. Return {"ok": True, "pdf_url": "<absolute url>", "date": "<YYYY-MM-DD>"}
+
+    Falls back to today if no date is provided.
+    """
+    _require_secret(x_scraper_secret)
+
+    import json as _json
+    from urllib.parse import urljoin, urlparse
+    import httpx
+    from bs4 import BeautifulSoup
+    import re as _re
+
+    CAUSELIST_DAILY_URL = os.getenv(
+        "CAUSELIST_DAILY_URL",
+        "https://hckinfo.keralacourts.in/digicourt/Casedetailssearch/viewCauselist",
+    )
+    LATEST_BTN_RE = _re.compile(r"VIEW\s+LATEST\s+ENTIRE\s+LIST\s*\(DAILY\)", _re.IGNORECASE)
+
+    target_date_str: str = payload.get("date", "") or datetime.now(IST).strftime("%Y-%m-%d")
+    try:
+        target_date = date.fromisoformat(target_date_str)
+    except ValueError:
+        raise HTTPException(422, f"Invalid date: {target_date_str!r}")
+
+    source_url = CAUSELIST_DAILY_URL.strip()
+    parsed = urlparse(source_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    endpoint = urljoin(origin, "/digicourt/index.php/Casedetailssearch/clistbyDate")
+
+    ua = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    try:
+        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+            # Step 1: Seed session cookies by visiting the base page
+            client.get(source_url, headers={"User-Agent": ua})
+
+            # Step 2: POST to clistbyDate — try known field names
+            rendered = ""
+            for key in ["clist_date", "cdate", "date", "listing_date"]:
+                try:
+                    res = client.post(
+                        endpoint,
+                        data={key: target_date.strftime("%Y-%m-%d")},
+                        headers={
+                            "User-Agent": ua,
+                            "Origin": origin,
+                            "Referer": source_url,
+                            "X-Requested-With": "XMLHttpRequest",
+                            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        },
+                    )
+                    if not res.is_success:
+                        continue
+                    body = res.text or ""
+                    # Some versions return JSON with the table HTML inside
+                    try:
+                        payload_json = _json.loads(body)
+                        if isinstance(payload_json, dict):
+                            body = str(
+                                payload_json.get("p_table")
+                                or payload_json.get("html")
+                                or body
+                            )
+                    except Exception:
+                        pass
+                    if len(body) > len(rendered):
+                        rendered = body
+                    if ".pdf" in body.lower() or "viewentirelist" in body.lower():
+                        break
+                except Exception:
+                    continue
+
+        if not rendered:
+            return {"ok": False, "pdf_url": None, "date": str(target_date), "error": "No response from hckinfo"}
+
+        # Step 3: Find the PDF link in the returned HTML
+        soup = BeautifulSoup(rendered, "html.parser")
+        for a in soup.find_all("a", href=True):
+            label = a.get_text(" ", strip=True)
+            if not LATEST_BTN_RE.search(label or ""):
+                continue
+            href = (a.get("href") or "").strip()
+            if not href:
+                continue
+            abs_url = urljoin(source_url, href)
+            logger.info("full-cause-list-url: found PDF link for %s → %s", target_date, abs_url)
+            return {"ok": True, "pdf_url": abs_url, "date": str(target_date)}
+
+        # Fallback: look for any .pdf link if the labelled link is absent
+        for a in soup.find_all("a", href=True):
+            href = (a.get("href") or "").strip()
+            if ".pdf" in href.lower():
+                abs_url = urljoin(source_url, href)
+                logger.info("full-cause-list-url: fallback PDF link for %s → %s", target_date, abs_url)
+                return {"ok": True, "pdf_url": abs_url, "date": str(target_date)}
+
+        return {"ok": False, "pdf_url": None, "date": str(target_date), "error": "PDF link not found in hckinfo response"}
+
+    except Exception as exc:
+        logger.exception("full-cause-list-url: error for %s — %s", target_date, exc)
+        raise HTTPException(500, str(exc))
+
+
 # ── On-demand: daily cause list PDF ──────────────────────────────────────────
 
 @app.post("/scrape/daily-pdf")

@@ -386,6 +386,7 @@ export interface AdvocateCauseListRow {
   id:                string;
   date:              string;
   item_no:           number | null;
+  item_no_range:     string | null;
   court_hall:        string | null;
   court_hall_number: number | null;
   bench:             string | null;
@@ -426,6 +427,22 @@ export async function refreshAdvocateCauseList(
   return apiRequest<AdvocateCauseListResponse>(
     `/api/v1/advocate-cause-list/refresh${suffix}`,
     { token, method: "POST", timeoutMs: 90_000 },
+  );
+}
+
+export interface FullCauseListUrlResponse {
+  pdf_url: string;
+  date:    string;
+}
+
+export async function getFullCauseListPdfUrl(
+  token:      string | null,
+  targetDate: string,          // YYYY-MM-DD
+): Promise<FullCauseListUrlResponse> {
+  // 60 s — Oracle VM needs to GET viewCauselist, then POST to clistbyDate
+  return apiRequest<FullCauseListUrlResponse>(
+    `/api/v1/advocate-cause-list/full-list-url?target_date=${targetDate}`,
+    { token, timeoutMs: 60_000 },
   );
 }
 

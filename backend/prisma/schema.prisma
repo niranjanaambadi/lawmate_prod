@@ -565,6 +565,7 @@ model AdvocateCauseList {
   advocateCode    String?                       @map("advocate_code") @db.VarChar(50)
   date            DateTime                      @db.Date
   itemNo          Int?                          @map("item_no")
+  itemNoRange     String?                       @map("item_no_range") @db.VarChar(500)
   courtHall       String?                       @map("court_hall") @db.VarChar(100)
   courtHallNumber Int?                          @map("court_hall_number")
   bench           String?                       @db.VarChar(20)

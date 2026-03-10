@@ -1251,6 +1251,7 @@ class AdvocateCauseList(Base):
 
     # Cause-list entry fields
     item_no           = Column(Integer,      nullable=True)
+    item_no_range     = Column(String(500),  nullable=True)   # e.g. "1-8, 51-90, 101-117"
     court_hall        = Column(String(255),  nullable=True)
     court_hall_number = Column(String(50),   nullable=True)
     bench             = Column(String(255),  nullable=True)

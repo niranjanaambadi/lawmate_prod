@@ -357,6 +357,40 @@ async def _fetch(enc_name: str, target_date: date, adv_cd: str) -> list[dict]:
 # HTML parser
 # ============================================================================
 
+def _parse_parties_cell(td) -> tuple[str, str]:
+    """
+    Extract (petitioner, respondent) from a hckinfo parties <td>.
+
+    The portal renders parties as:
+        PETITIONER NAME<br>
+        Vs<br>RESPONDENT NAME
+
+    We split on line boundaries (introduced by <br> tags when using newline
+    separator) and discard the "Vs" / "V/S" separator line.
+
+    Returns:
+        (petitioner, respondent)  — either may be an empty string.
+    Falls back to (combined_text, "") when the format is not recognised.
+    """
+    # Use "\n" as separator so <br> tags become newline boundaries
+    raw = td.get_text(separator="\n", strip=True)
+    parts = [p.strip() for p in raw.split("\n") if p.strip()]
+
+    # Drop the "Vs" / "V/S" / "versus" separator token (case-insensitive)
+    non_vs = [
+        p for p in parts
+        if p.lower().rstrip(". ") not in ("vs", "v/s", "versus")
+    ]
+
+    if len(non_vs) >= 2:
+        return non_vs[0], non_vs[1]
+    if len(non_vs) == 1:
+        return non_vs[0], ""
+
+    # Edge case: no usable text — fall back to combined string
+    return td.get_text(separator=" ", strip=True), ""
+
+
 def _parse_table(html: str, target_date: date) -> list[dict]:
     """
     Parses the response HTML table from hckinfo.keralacourts.in/digicourt.
@@ -368,9 +402,10 @@ def _parse_table(html: str, target_date: date) -> list[dict]:
       [0] Item No | [1] Court Hall | [2] Bench | [3] List Type
       | [4] Judge Name | [5] Case No | [6] Petitioner | [7] Respondent
 
-    NEW 7-column format (Judge Name merged into the Bench cell):
+    NEW 6-column format (Judge Name merged into Bench; Parties is one combined
+    cell with petitioner, "Vs", and respondent separated by <br> tags):
       [0] Item No | [1] Court Hall | [2] Bench | [3] List Type
-      | [4] Case No | [5] Petitioner | [6] Respondent
+      | [4] Case No | [5] Parties (petitioner<br>Vs<br>respondent)
 
     Detection: if column 4 matches a case-number pattern (digits / 4-digit year,
     e.g. "7749/ 2023") the new layout is assumed.
@@ -398,7 +433,11 @@ def _parse_table(html: str, target_date: date) -> list[dict]:
 
         texts = [c.get_text(separator=" ", strip=True) for c in cols]
 
-        item_no_raw = texts[0] if len(texts) > 0 else ""
+        # Item No: the integer is in the cell text; the range of all item
+        # numbers this case spans is stored in the <td title="..."> attribute.
+        item_no_raw   = texts[0] if len(texts) > 0 else ""
+        item_no_range = (cols[0].get("title") or "").strip() or None
+
         court_hall  = texts[1] if len(texts) > 1 else ""
         bench       = texts[2] if len(texts) > 2 else ""
         list_type   = texts[3] if len(texts) > 3 else ""
@@ -406,13 +445,15 @@ def _parse_table(html: str, target_date: date) -> list[dict]:
 
         # Auto-detect column layout
         if _CASE_NO_RE.search(t4):
-            # NEW format: Case No at index 4 (Judge Name merged into Bench)
-            judge_name = None
-            case_no    = t4
-            petitioner = texts[5] if len(texts) > 5 else ""
-            respondent = texts[6] if len(texts) > 6 else ""
+            # NEW format: Case No at index 4 (Judge Name merged into Bench).
+            # Column 5 is the combined Parties cell: "PET<br>Vs<br>RESP".
+            # Parse it properly to get separate petitioner and respondent.
+            judge_name            = None
+            case_no               = t4
+            petitioner, respondent = _parse_parties_cell(cols[5]) if len(cols) > 5 else ("", "")
         else:
-            # OLD format: Judge Name at index 4
+            # OLD format: Judge Name at index 4; petitioner/respondent in
+            # separate columns 6 and 7.
             judge_name = t4
             case_no    = texts[5] if len(texts) > 5 else ""
             petitioner = texts[6] if len(texts) > 6 else ""
@@ -421,6 +462,7 @@ def _parse_table(html: str, target_date: date) -> list[dict]:
         result.append({
             "date":              target_date,
             "item_no":           _parse_int(item_no_raw),
+            "item_no_range":     (item_no_range[:500] if item_no_range else None),
             "court_hall":        (court_hall[:255]  if court_hall  else None),
             "court_hall_number": _extract_court_hall_number(court_hall),
             "bench":             (bench[:499]       if bench       else None),
@@ -447,10 +489,37 @@ def _upsert_rows(
     target_date:      date,
 ) -> list[AdvocateCauseList]:
     """
-    PostgreSQL ON CONFLICT DO UPDATE upsert.
-    Unique constraint: uq_advocate_cause_lists_lawyer_adv_date_case
+    Replace-style write: delete all existing rows for (lawyer_id, date),
+    then insert the freshly-parsed rows.
+
+    Why not a plain upsert?  The unique constraint is on
+    (lawyer_id, advocate_name, date, case_no).  Old data from the pre-fix
+    scraper stored party names in case_no (column mis-alignment), so those rows
+    have a *different* case_no value than the corrected rows — the upsert never
+    fires a conflict and both copies survive, creating duplicates.
+
+    Why not filter on advocate_name in the DELETE?  The advocate_name stored
+    in old rows may differ from the current db_advocate_name format (e.g. old
+    rows may lack the "(ENROLLMENT)" suffix).  Filtering on it would miss
+    those stale rows and still leave duplicates.
+
+    Deleting first solves this cleanly.  The DELETE and all INSERTs live in a
+    single transaction, so a mid-way failure rolls everything back and the
+    previous data is preserved.
     """
     now = datetime.utcnow()
+
+    # Purge stale rows for this (lawyer, date) before writing fresh data.
+    # NOTE: we deliberately do NOT filter on advocate_name here.  Old rows may
+    # have been stored with a different advocate_name format (e.g. without the
+    # enrollment suffix) compared to what db_advocate_name is now.  Filtering
+    # on advocate_name would miss those rows and leave duplicate stale data.
+    # Since lawyer_id is per-user and date is specific, this is still safe.
+    db.query(AdvocateCauseList).filter(
+        AdvocateCauseList.lawyer_id == UUID(lawyer_id),
+        AdvocateCauseList.date      == target_date,
+    ).delete(synchronize_session=False)
+    db.flush()
 
     for row in rows:
         stmt = pg_insert(AdvocateCauseList).values(
@@ -459,6 +528,7 @@ def _upsert_rows(
             advocate_code=advocate_code or None,
             date=row["date"],
             item_no=row["item_no"],
+            item_no_range=row.get("item_no_range"),
             court_hall=row["court_hall"],
             court_hall_number=row["court_hall_number"],
             bench=row["bench"],
@@ -476,6 +546,7 @@ def _upsert_rows(
             set_={
                 "item_no":           pg_insert(AdvocateCauseList).excluded.item_no,
                 "court_hall":        pg_insert(AdvocateCauseList).excluded.court_hall,
+                "item_no_range":     pg_insert(AdvocateCauseList).excluded.item_no_range,
                 "court_hall_number": pg_insert(AdvocateCauseList).excluded.court_hall_number,
                 "bench":             pg_insert(AdvocateCauseList).excluded.bench,
                 "list_type":         pg_insert(AdvocateCauseList).excluded.list_type,

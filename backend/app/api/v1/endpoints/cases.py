@@ -290,7 +290,12 @@ def get_pending_status_rows(
             "tentative_date": _first_val(last_row, ["next_date", "tentative_date", "next_hearing_date"]),
             "purpose_of_hearing": _first_val(last_row, ["purpose_of_hearing", "purpose", "stage"]),
             "order_text": _first_val(last_row, ["order", "order_text", "remarks"]),
-            "judge_name": _first_val(last_row, ["hon_judge_name", "judge_name", "judge", "bench", "coram"]),
+            # Fall back to Case.judge_name (populated from coram during sync) if
+            # the hearing-history row doesn't carry the judge name directly.
+            "judge_name": (
+                _first_val(last_row, ["hon_judge_name", "judge_name", "judge", "coram"])
+                or c.judge_name
+            ),
         })
     return result
 

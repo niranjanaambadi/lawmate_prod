@@ -5,8 +5,9 @@ Endpoints for advocate-wise cause list from hckinfo.keralacourts.in/digicourt.
 
 Endpoints
 ---------
-GET  /advocate-cause-list          → return cached rows for a date (default: tomorrow)
-POST /advocate-cause-list/refresh  → trigger a live fetch and return updated rows
+GET  /advocate-cause-list                → return cached rows for a date (default: tomorrow)
+POST /advocate-cause-list/refresh        → trigger a live fetch and return updated rows
+GET  /advocate-cause-list/full-list-url  → return PDF URL for the full daily cause list
 """
 
 from __future__ import annotations
@@ -21,8 +22,9 @@ from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
 from app.api.v1.deps import get_current_user
+from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import AdvocateCauseList, User
+from app.db.models import AdvocateCauseList, CauseListIngestionRun, CauseListSource, User
 from app.services.advocate_causelist_service import (
     fetch_and_store_advocate_causelist,
     lookup_advocate_code,
@@ -41,6 +43,7 @@ class AdvocateCauseListRow(BaseModel):
     id:                str
     date:              date
     item_no:           Optional[int]
+    item_no_range:     Optional[str]
     court_hall:        Optional[str]
     court_hall_number: Optional[int]
     bench:             Optional[str]
@@ -141,6 +144,7 @@ async def get_advocate_cause_list(
             id=str(r.id),
             date=r.date,
             item_no=r.item_no,
+            item_no_range=getattr(r, "item_no_range", None),
             court_hall=r.court_hall,
             court_hall_number=r.court_hall_number,
             bench=r.bench,
@@ -198,6 +202,90 @@ async def lookup_advocate_code_endpoint(
         code, current_user.id, current_user.khc_advocate_name,
     )
     return {"adv_cd": code, "saved": True}
+
+
+@router.get("/full-list-url")
+async def get_full_cause_list_url(
+    target_date: Optional[date] = Query(
+        None,
+        description="Date to fetch (YYYY-MM-DD). Defaults to today (IST).",
+    ),
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(get_current_user),
+):
+    """
+    Returns a URL to view the full daily cause list PDF for a given date.
+
+    Priority:
+      1. S3 (pre-fetched by the 6:45 PM / 7:15 PM IST scheduled job) →
+         generates a presigned URL valid for 1 hour.
+      2. On-demand fetch via Oracle VM (hckinfo clistbyDate) → returns the
+         direct hckinfo PDF URL as a fallback when the PDF is not in S3 yet.
+      3. 404 if neither source has the PDF.
+    """
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    IST_now = datetime.now(IST)
+    fetch_date = target_date or IST_now.date()
+
+    # ── 1. Check S3 via CauseListIngestionRun ─────────────────────────────────
+    run = (
+        db.query(CauseListIngestionRun)
+        .filter(
+            CauseListIngestionRun.listing_date == fetch_date,
+            CauseListIngestionRun.source       == CauseListSource.daily,
+            CauseListIngestionRun.status       == "fetched",
+        )
+        .order_by(CauseListIngestionRun.fetched_at.desc())
+        .first()
+    )
+
+    if run and run.s3_key and run.s3_bucket:
+        try:
+            s3 = boto3.client(
+                "s3",
+                region_name=settings.AWS_REGION,
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            )
+            presigned_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": run.s3_bucket, "Key": run.s3_key},
+                ExpiresIn=3600,  # 1 hour
+            )
+            logger.info(
+                "full-list-url: serving from S3 for date=%s key=%s",
+                fetch_date, run.s3_key,
+            )
+            return {"pdf_url": presigned_url, "date": str(fetch_date), "from_s3": True}
+        except (BotoCoreError, ClientError) as exc:
+            logger.warning(
+                "full-list-url: S3 presign failed for date=%s — %s; falling through to on-demand",
+                fetch_date, exc,
+            )
+
+    # ── 2. On-demand fallback via Oracle VM ───────────────────────────────────
+    if scraper_client_service.is_scraper_remote():
+        try:
+            result = scraper_client_service.scrape_full_cause_list_url(str(fetch_date))
+            if result.get("ok") and result.get("pdf_url"):
+                logger.info(
+                    "full-list-url: on-demand Oracle VM PDF URL for date=%s → %s",
+                    fetch_date, result["pdf_url"],
+                )
+                return {"pdf_url": result["pdf_url"], "date": str(fetch_date), "from_s3": False}
+        except Exception as exc:
+            logger.warning("full-list-url: Oracle VM on-demand failed for date=%s — %s", fetch_date, exc)
+
+    # ── 3. Not available ──────────────────────────────────────────────────────
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            f"Full cause list PDF is not yet available for {fetch_date}. "
+            "It is fetched automatically at 6:45 PM and 7:15 PM IST."
+        ),
+    )
 
 
 @router.post("/refresh", response_model=AdvocateCauseListResponse)
@@ -264,6 +352,7 @@ async def refresh_advocate_cause_list(
             id=str(r.id),
             date=r.date,
             item_no=r.item_no,
+            item_no_range=getattr(r, "item_no_range", None),
             court_hall=r.court_hall,
             court_hall_number=r.court_hall_number,
             bench=r.bench,
