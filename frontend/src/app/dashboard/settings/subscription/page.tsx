@@ -95,7 +95,7 @@ export default function SettingsSubscriptionPage() {
                 <p className="text-xs text-slate-500">Usage This Period</p>
                 <p className="mt-2 text-sm">Cases: {usage?.casesCount ?? 0}</p>
                 <p className="text-sm">Documents: {usage?.documentsCount ?? 0}</p>
-                <p className="text-sm">Storage: {(usage?.storageUsedGb ?? 0).toFixed(2)} GB</p>
+                <p className="text-sm">Storage: {Number(usage?.storageUsedGb ?? 0).toFixed(2)} GB</p>
                 <p className="text-sm">AI Analyses: {usage?.aiAnalysesUsed ?? 0}</p>
               </div>
               <div className="rounded-md border p-3">
