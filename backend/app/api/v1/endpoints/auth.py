@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.logger import logger
 from app.api.deps import get_current_user
 from app.services.otp_service import otp_service
+from app.services import subscription_service
 
 router = APIRouter()
 
@@ -41,6 +42,12 @@ def login(form_data: schemas.UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is inactive"
+        )
+
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not verified. Please complete OTP verification from your registration email.",
         )
     
     # Create token
@@ -154,9 +161,14 @@ def reset_password(body: schemas.ResetPasswordRequest, db: Session = Depends(get
     return {"success": True, "message": "Your password has been reset. You can sign in now."}
 
 
-@router.post("/register", response_model=schemas.UserOut)
+@router.post("/register")
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    """Register new user. Aligned with webapp: normalized email, duplicate checks, is_verified=True."""
+    """
+    Register new user. Creates account with is_verified=True and returns a JWT
+    immediately so the client can enter the dashboard. KHC identity verification
+    (profile-verification/start + confirm) is enforced inside the dashboard layout
+    for all users who have not yet completed it (profile_verified_at is null).
+    """
     email = (user.email or "").strip().lower()
     khc_id = (user.khc_advocate_id or "").strip()
     name = (user.khc_advocate_name or "").strip()
@@ -170,8 +182,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     if not name:
         raise HTTPException(status_code=400, detail="Full name is required")
 
-    existing_user = db.query(models.User).filter(models.User.email == email).first()
-    if existing_user:
+    if db.query(models.User).filter(models.User.email == email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     existing_khc = db.query(models.User).filter(models.User.khc_advocate_id == khc_id).first()
@@ -183,6 +194,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         if existing_mobile:
             raise HTTPException(status_code=409, detail="This mobile number is already registered")
 
+    now = datetime.utcnow()
     db_user = models.User(
         email=email,
         password_hash=get_password_hash(user.password),
@@ -192,12 +204,32 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         khc_enrollment_number=enrollment,
         role=UserRole.advocate,
         is_active=True,
-        is_verified=True,  # Allow immediate access; set False when email verification is added
+        is_verified=True,
+        last_login_at=now,
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return db_user
+
+    access_token = create_access_token(
+        data={"sub": str(db_user.id)},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": str(db_user.id),
+            "email": db_user.email,
+            "khc_advocate_id": db_user.khc_advocate_id,
+            "khc_advocate_name": db_user.khc_advocate_name,
+            "role": getattr(db_user.role, "value", db_user.role) if hasattr(db_user, "role") else (db_user.role or "advocate"),
+            "is_verified": db_user.is_verified,
+            "profile_verified_at": db_user.profile_verified_at,
+        },
+    }
 
 
 def _normalize_name(value: str) -> str:
@@ -319,6 +351,11 @@ def confirm_profile_verification(
     current_user.verification_otp_code = None
     current_user.verification_otp_expires_at = None
     db.commit()
+
+    # Start the free trial from the moment identity is verified
+    subscription_service.get_or_create_current_subscription(
+        db, str(current_user.id), start_at=now
+    )
 
     return schemas.ProfileVerificationConfirmResponse(
         success=True,

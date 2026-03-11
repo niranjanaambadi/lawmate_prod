@@ -116,9 +116,12 @@ def _invoice_to_api(inv: Invoice) -> Dict[str, Any]:
     }
 
 
-def get_or_create_current_subscription(db: Session, user_id: str) -> Dict[str, Any]:
+def get_or_create_current_subscription(
+    db: Session, user_id: str, start_at: Optional[datetime] = None
+) -> Dict[str, Any]:
     """
     Return current subscription row. If missing, create a default TRIAL/FREE.
+    Pass start_at to anchor the trial to a specific timestamp (e.g. profile_verified_at).
     """
     sub = (
         db.query(Subscription)
@@ -127,7 +130,7 @@ def get_or_create_current_subscription(db: Session, user_id: str) -> Dict[str, A
         .first()
     )
     if not sub:
-        now = datetime.utcnow()
+        now = start_at or datetime.utcnow()
         sub = Subscription(
             user_id=user_id,
             plan=SubscriptionPlan.free,
