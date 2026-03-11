@@ -1,13 +1,14 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { LogOut, Scale } from "lucide-react";
+import { LogOut, Scale, Lock, AlertTriangle } from "lucide-react";
+import Link from "next/link";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Input } from "@/components/ui/input";
-import { authApi } from "@/lib/api";
+import { authApi, getCurrentSubscription, type SubscriptionCurrent } from "@/lib/api";
 
 export default function DashboardLayout({
   children,
@@ -16,6 +17,28 @@ export default function DashboardLayout({
 }) {
   const { isAuthenticated, isLoading, user, token, logout, refreshUser } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // ── Subscription gate state ──────────────────────────────────────────────
+  const [sub, setSub] = useState<SubscriptionCurrent | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    getCurrentSubscription(token).then(setSub).catch(() => setSub(null));
+  }, [token]);
+
+  const isActive = sub?.status?.toUpperCase() === "ACTIVE";
+  const isTrialing = sub?.status?.toUpperCase() === "TRIAL";
+  const trialEndDate = sub?.trialEndDate ? new Date(sub.trialEndDate) : null;
+  const trialExpired = isTrialing && trialEndDate !== null && trialEndDate < new Date();
+  const trialDaysLeft = trialEndDate
+    ? Math.ceil((trialEndDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  // Settings pages are always accessible (so user can subscribe)
+  const isSettingsPath = pathname?.startsWith("/dashboard/settings");
+  // Gate all non-settings pages when trial has expired
+  const isGated = trialExpired && !isActive && !isSettingsPath;
   const [fullName, setFullName] = useState("");
   const [verifyVia, setVerifyVia] = useState<"phone" | "email">("phone");
   const [otp, setOtp] = useState("");
@@ -187,6 +210,9 @@ export default function DashboardLayout({
     );
   }
 
+  // Trial banner shown when trial is expiring (≤ 2 days) or expired
+  const showBanner = sub !== null && !isActive && (trialExpired || (trialDaysLeft !== null && trialDaysLeft <= 2));
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -222,8 +248,64 @@ export default function DashboardLayout({
             </Button>
           </div>
         </header>
-        <main className="flex-1 overflow-auto py-6">
-          <div className="w-full px-6">{children}</div>
+
+        {/* ── Trial expiry banner ─────────────────────────────────────────── */}
+        {showBanner && (
+          <div className={`flex items-center justify-between gap-3 px-6 py-2.5 text-sm ${
+            trialExpired
+              ? "bg-red-600 text-white"
+              : "bg-amber-500 text-slate-900"
+          }`}>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              {trialExpired
+                ? "Your free trial has ended. Subscribe to restore full access."
+                : trialDaysLeft === 0
+                  ? "Your free trial ends today."
+                  : `Your free trial ends in ${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"}.`}
+            </div>
+            <Link
+              href="/dashboard/settings/subscription"
+              className={`shrink-0 rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                trialExpired
+                  ? "bg-white text-red-700 hover:bg-red-50"
+                  : "bg-slate-900 text-white hover:bg-slate-800"
+              }`}
+            >
+              Subscribe now →
+            </Link>
+          </div>
+        )}
+
+        <main className="relative flex-1 overflow-auto py-6">
+          {/* Page content — blurred when gated */}
+          <div className={`w-full px-6 ${isGated ? "pointer-events-none select-none blur-sm" : ""}`}>
+            {children}
+          </div>
+
+          {/* ── Paywall overlay — shown on non-settings pages when expired ── */}
+          {isGated && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60 backdrop-blur-sm">
+              <div className="mx-4 w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl text-center">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+                  <Lock className="h-7 w-7 text-red-600" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-900">Trial ended</h2>
+                <p className="mt-2 text-sm text-slate-500">
+                  Your 3-day free trial has expired. Subscribe to unlock your workspace and keep all your cases and documents.
+                </p>
+                <Link
+                  href="/dashboard/settings/subscription"
+                  className="mt-6 block w-full rounded-lg bg-amber-600 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-700 transition-colors"
+                >
+                  Subscribe now — ₹1,200/month
+                </Link>
+                <p className="mt-3 text-xs text-slate-400">
+                  Cancel anytime · No long-term commitment
+                </p>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>

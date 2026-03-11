@@ -7,8 +7,10 @@ import {
   getSubscriptionInvoices,
   getSubscriptionPlans,
   getSubscriptionUsage,
+  getEarlyBirdStats,
   createSubscriptionOrder,
   verifySubscriptionPayment,
+  type EarlyBirdStats,
   type InvoiceItem,
   type SubscriptionCurrent,
   type SubscriptionPlan,
@@ -87,8 +89,13 @@ export default function SettingsSubscriptionPage() {
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
 
+  const [ebStats, setEbStats] = useState<EarlyBirdStats | null>(null);
   const [subscribeLoading, setSubscribeLoading] = useState(false);
   const [subscribeMessage, setSubscribeMessage] = useState<string | null>(null);
+
+  const isEarlyBird = ebStats?.earlyBirdAvailable !== false;
+  const planPrice = isEarlyBird ? "₹1,200" : "₹1,500";
+  const planPriceStrike = isEarlyBird ? "₹1,500" : null;
 
   function loadData() {
     if (!token) return;
@@ -122,6 +129,10 @@ export default function SettingsSubscriptionPage() {
     return cleanup;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    getEarlyBirdStats().then(setEbStats).catch(() => setEbStats(null));
+  }, []);
 
   const currentPlan = useMemo(
     () => plans.find((p) => p.id.toUpperCase() === (subscription?.plan || "").toUpperCase()) || null,
@@ -246,11 +257,15 @@ export default function SettingsSubscriptionPage() {
                   LawMate Professional
                 </p>
                 <p className="mt-1 text-2xl font-bold text-slate-900">
-                  ₹1,200
+                  {planPrice}
                   <span className="text-sm font-normal text-slate-500"> /month</span>
-                  <span className="ml-2 text-xs font-normal text-slate-400 line-through">₹1,500</span>
+                  {planPriceStrike && (
+                    <span className="ml-2 text-xs font-normal text-slate-400 line-through">{planPriceStrike}</span>
+                  )}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-400">+ 18% GST · Early bird pricing</p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  + 18% GST{isEarlyBird ? " · Early bird pricing" : ""}
+                </p>
                 <ul className="mt-3 space-y-1 text-sm text-slate-600">
                   <li>✓ 20 cases · 60 documents · 100 AI analyses / month</li>
                   <li>✓ All features included</li>
@@ -262,7 +277,7 @@ export default function SettingsSubscriptionPage() {
                   disabled={subscribeLoading}
                   className="mt-4 w-full rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60 transition-colors"
                 >
-                  {subscribeLoading ? "Opening checkout…" : "Subscribe now — ₹1,200/month"}
+                  {subscribeLoading ? "Opening checkout…" : `Subscribe now — ${planPrice}/month`}
                 </button>
                 {subscribeMessage && (
                   <p className={`mt-2 text-sm font-medium ${
