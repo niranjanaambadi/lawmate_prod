@@ -211,7 +211,7 @@ class Settings(BaseSettings):
     # ── Top-up & slot config ──────────────────────────────────────────────────
     TOPUP_AI_ANALYSES: int = 20     # AI analyses credited per top-up purchase
     EARLY_BIRD_SLOTS: int = 100     # max users eligible for early-bird pricing
-    TRIAL_DAYS: int = 3             # free trial length on new sign-up
+    TRIAL_DAYS: int = 60            # free trial length on new sign-up
 
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
