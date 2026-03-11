@@ -137,7 +137,7 @@ def get_or_create_current_subscription(db: Session, user_id: str) -> Dict[str, A
             currency="INR",
             start_date=now,
             end_date=now + timedelta(days=30),
-            trial_end_date=now + timedelta(days=7),
+            trial_end_date=now + timedelta(days=settings.TRIAL_DAYS),
             auto_renew=True,
             payment_method=None,
         )
