@@ -193,6 +193,25 @@ class Settings(BaseSettings):
     # Feature flags
     HEARING_DAY_ENABLED: bool = True
 
+    # ── Razorpay Payment Gateway ──────────────────────────────────────────────
+    # Set these in your environment / Railway / App Runner secrets.
+    RAZORPAY_KEY_ID: str = ""           # rzp_live_... or rzp_test_...
+    RAZORPAY_KEY_SECRET: str = ""       # secret key (never expose to frontend)
+    RAZORPAY_WEBHOOK_SECRET: str = ""   # from Razorpay Dashboard > Webhooks
+
+    # Razorpay Plan IDs — create once in Razorpay Dashboard > Subscriptions > Plans
+    RAZORPAY_EARLY_BIRD_PLAN_ID: str = ""   # monthly plan at EARLY_BIRD_PLAN_AMOUNT_PAISE
+    RAZORPAY_STANDARD_PLAN_ID: str = ""     # monthly plan at STANDARD_PLAN_AMOUNT_PAISE
+
+    # ── Pricing (stored in paise; INR amount × 100) ───────────────────────────
+    EARLY_BIRD_PLAN_AMOUNT_PAISE: int = 120000   # ₹1,200 / month
+    STANDARD_PLAN_AMOUNT_PAISE: int = 150000     # ₹1,500 / month
+    TOPUP_AMOUNT_PAISE: int = 20000              # ₹200 per top-up
+
+    # ── Top-up & slot config ──────────────────────────────────────────────────
+    TOPUP_AI_ANALYSES: int = 20     # AI analyses credited per top-up purchase
+    EARLY_BIRD_SLOTS: int = 100     # max users eligible for early-bird pricing
+
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
         env_file=".env",

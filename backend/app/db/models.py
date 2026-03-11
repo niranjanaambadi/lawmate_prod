@@ -788,6 +788,7 @@ class Subscription(Base):
     trial_end_date = Column(TIMESTAMP, nullable=True)
     auto_renew = Column(Boolean, nullable=False, default=True)
     payment_method = Column(SQLEnum(PaymentMethod), nullable=True)
+    razorpay_subscription_id = Column(String(255), nullable=True, index=True)  # sub_XXXX from Razorpay
 
     created_at = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

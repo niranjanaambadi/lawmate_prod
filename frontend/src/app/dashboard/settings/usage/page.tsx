@@ -4,7 +4,63 @@ import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
-import { getSubscriptionUsage, purchaseTopup, type UsageStats } from "@/lib/api";
+import {
+  getSubscriptionUsage,
+  createTopupOrder,
+  verifyTopupPayment,
+  type UsageStats,
+} from "@/lib/api";
+
+// ── Razorpay checkout helpers (browser-only) ──────────────────────────────────
+
+/** Injects the Razorpay checkout.js script once and resolves when ready. */
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined") return reject(new Error("SSR"));
+    if ((window as any).Razorpay) return resolve();
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Razorpay SDK"));
+    document.body.appendChild(script);
+  });
+}
+
+interface RazorpayPaymentResponse {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}
+
+/** Opens the Razorpay modal and resolves with payment IDs on success. */
+function openRazorpayCheckout(opts: {
+  keyId: string;
+  orderId: string;
+  amountPaise: number;
+  currency: string;
+  name: string;
+  description: string;
+}): Promise<RazorpayPaymentResponse> {
+  return new Promise((resolve, reject) => {
+    const rzp = new (window as any).Razorpay({
+      key: opts.keyId,
+      amount: opts.amountPaise,
+      currency: opts.currency,
+      name: opts.name,
+      description: opts.description,
+      order_id: opts.orderId,
+      handler: resolve,
+      modal: {
+        ondismiss: () => reject(new Error("Payment cancelled")),
+      },
+      theme: { color: "#f59e0b" },
+    });
+    rzp.on("payment.failed", (resp: any) =>
+      reject(new Error(resp?.error?.description || "Payment failed"))
+    );
+    rzp.open();
+  });
+}
 
 // Lazy-load the chart component with SSR disabled — chart.js requires browser canvas
 const DoughnutChart = dynamic(
@@ -196,11 +252,38 @@ export default function SettingsUsagePage() {
     setTopupLoading(true);
     setTopupMessage(null);
     try {
-      const result = await purchaseTopup(token);
+      // 1. Load Razorpay SDK
+      await loadRazorpayScript();
+
+      // 2. Create order on backend (returns orderId + keyId)
+      const order = await createTopupOrder(token);
+
+      // 3. Open Razorpay checkout modal
+      const payment = await openRazorpayCheckout({
+        keyId: order.keyId,
+        orderId: order.orderId,
+        amountPaise: order.amountPaise,
+        currency: order.currency,
+        name: "LawMate",
+        description: `+${order.aiAnalyses} AI analyses`,
+      });
+
+      // 4. Verify payment signature on backend → credit usage_topups
+      const result = await verifyTopupPayment(token, {
+        razorpay_order_id: payment.razorpay_order_id,
+        razorpay_payment_id: payment.razorpay_payment_id,
+        razorpay_signature: payment.razorpay_signature,
+      });
+
       setTopupMessage(`+${result.aiAnalysesAdded} AI analyses added for this month.`);
-      loadUsage(); // refresh
-    } catch {
-      setTopupMessage("Top-up failed. Please try again.");
+      loadUsage(); // refresh usage stats
+    } catch (err: any) {
+      const msg = err?.message || "";
+      if (msg === "Payment cancelled") {
+        setTopupMessage(null); // user closed modal — no error
+      } else {
+        setTopupMessage(msg || "Top-up failed. Please try again.");
+      }
     } finally {
       setTopupLoading(false);
     }

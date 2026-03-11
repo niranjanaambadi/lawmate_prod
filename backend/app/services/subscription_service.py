@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import (
     AIAnalysis,
     AIAnalysisStatus,
@@ -51,8 +52,15 @@ PLAN_LIMITS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-TOPUP_AI_ANALYSES = 20   # units added per ₹200 top-up
-TOPUP_PRICE_INR   = 200
+# Read top-up config from settings so values can be changed via environment variables.
+# settings.TOPUP_AI_ANALYSES  — AI analyses added per top-up (default 20)
+# settings.TOPUP_AMOUNT_PAISE — price in paise (default 20000 = ₹200)
+
+def _topup_ai_analyses() -> int:
+    return settings.TOPUP_AI_ANALYSES
+
+def _topup_price_inr() -> int:
+    return settings.TOPUP_AMOUNT_PAISE // 100
 
 
 def get_plan_limits(plan_name: str) -> Dict[str, Any]:
@@ -369,8 +377,8 @@ def purchase_topup(
     topup = UsageTopup(
         user_id=user_id,
         period_start=period_start,
-        ai_analyses_added=TOPUP_AI_ANALYSES,
-        amount_paid=TOPUP_PRICE_INR,
+        ai_analyses_added=_topup_ai_analyses(),
+        amount_paid=_topup_price_inr(),
         currency="INR",
         payment_reference=payment_reference,
     )

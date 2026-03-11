@@ -1242,6 +1242,95 @@ export async function purchaseTopup(
   return res.data;
 }
 
+// ── Payments (Razorpay) ───────────────────────────────────────────────────────
+
+/** Pricing config returned by GET /api/v1/payments/config (no auth needed). */
+export interface PaymentConfig {
+  keyId: string;
+  earlyBirdAmountPaise: number;
+  standardAmountPaise: number;
+  topupAmountPaise: number;
+  topupAiAnalyses: number;
+  earlyBirdSlots: number;
+  currency: string;
+}
+
+/** Response from POST /api/v1/payments/create-topup-order */
+export interface TopupOrder {
+  orderId: string;
+  amountPaise: number;
+  currency: string;
+  keyId: string;
+  aiAnalyses: number;
+}
+
+/** Response from POST /api/v1/payments/create-subscription */
+export interface SubscriptionOrder {
+  subscriptionId: string;
+  keyId: string;
+  amountPaise: number;
+  planType: "early_bird" | "standard";
+}
+
+/** Payload sent back to backend after Razorpay modal closes for a top-up. */
+export interface VerifyTopupPayload {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+/** Payload sent back to backend after Razorpay modal closes for a subscription. */
+export interface VerifySubscriptionPayload {
+  razorpay_payment_id: string;
+  razorpay_subscription_id: string;
+  razorpay_signature: string;
+}
+
+/** Fetch public payment config — no token required. */
+export async function getPaymentConfig(): Promise<PaymentConfig> {
+  return apiRequest<PaymentConfig>("/api/v1/payments/config");
+}
+
+/** Step 1 of top-up: create Razorpay order on the backend. */
+export async function createTopupOrder(token: string): Promise<TopupOrder> {
+  return apiRequest<TopupOrder>("/api/v1/payments/create-topup-order", {
+    method: "POST",
+    token,
+  });
+}
+
+/** Step 2 of top-up: verify payment signature and credit usage_topups. */
+export async function verifyTopupPayment(
+  token: string,
+  payload: VerifyTopupPayload
+): Promise<TopupResult> {
+  return apiRequest<TopupResult>("/api/v1/payments/verify-topup", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Step 1 of subscription: create Razorpay subscription on the backend. */
+export async function createSubscriptionOrder(token: string): Promise<SubscriptionOrder> {
+  return apiRequest<SubscriptionOrder>("/api/v1/payments/create-subscription", {
+    method: "POST",
+    token,
+  });
+}
+
+/** Step 2 of subscription: verify payment signature and activate plan. */
+export async function verifySubscriptionPayment(
+  token: string,
+  payload: VerifySubscriptionPayload
+): Promise<{ status: string; plan: string; subscriptionId: string }> {
+  return apiRequest("/api/v1/payments/verify-subscription", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
 // ── Public (no-auth) stats ────────────────────────────────────────────────────
 
 export interface EarlyBirdStats {

@@ -59,6 +59,13 @@ try:
 except ImportError:
     pass
 
+# Payments (Razorpay) — always registered; endpoints degrade gracefully if keys not set
+try:
+    from app.api.v1.endpoints import payments as payments_endpoint
+    api_router.include_router(payments_endpoint.router, prefix="/payments", tags=["Payments"])
+except ImportError:
+    pass
+
 # Include new endpoints if available
 if HAS_NEW_ENDPOINTS:
     api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
