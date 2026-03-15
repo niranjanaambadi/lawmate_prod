@@ -152,9 +152,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     tabSync?.broadcast({ type: "AUTH_TOKEN_UPDATE", token: access_token });
   }, []);
 
-  const register = useCallback(async (data: RegisterPayload) => {
-    await authApi.register(data);
-    router.push("/signin?registered=true");
+  const register = useCallback(async (data: RegisterPayload): Promise<void> => {
+    const { access_token, user: u } = await authApi.register(data);
+    setStoredToken(access_token);
+    setToken(access_token);
+    setUser(u);
+    tabSync?.broadcast({ type: "AUTH_TOKEN_UPDATE", token: access_token });
+    router.push("/dashboard");
   }, [router]);
 
   const logout = useCallback(() => {

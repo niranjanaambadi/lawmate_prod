@@ -30,11 +30,11 @@ class AdvocateCauseListTool(BaseTool):
     name = "get_advocate_cause_list"
 
     description = (
-        "Fetches the advocate-wise cause list from Kerala HC digicourt portal. "
+        "Fetches the advocate-wise cause list from Kerala HC digicourt portal (live scrape). "
         "Returns item numbers, court hall, bench code, judge name, and case details "
         "for each case listed for the advocate on a given date. "
-        "Use when the lawyer asks for their item number, which court hall they are in, "
-        "or who the judge is for a specific case today."
+        "Use for today's item number, court hall, or judge; use get_cause_list for bulk list "
+        "or when live scrape is not needed."
     )
 
     input_schema = {

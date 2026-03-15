@@ -118,7 +118,7 @@ export const authApi = {
       timeoutMs: 60000,
     }),
   register: (data: RegisterPayload) =>
-    apiRequest<{ id: string }>("/api/v1/auth/register", {
+    apiRequest<{ access_token: string; token_type: string; user: AuthUser }>("/api/v1/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -191,6 +191,7 @@ export interface RegisterPayload {
   mobile?: string;
   khc_enrollment_number?: string;
 }
+
 
 const getAuthHeaders = (token: string | null) =>
   token ? { Authorization: `Bearer ${token}` } : {};

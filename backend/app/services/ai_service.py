@@ -280,6 +280,7 @@ Respond with ONLY the JSON, no additional text.
     def chat_with_document(
         self,
         document_id: str,
+        advocate_id: str,
         message: str,
         conversation_history: list,
         db: Session
@@ -288,8 +289,19 @@ Respond with ONLY the JSON, no additional text.
         Chat with a specific document using Claude
         """
         try:
+            doc_uuid = UUID(str(document_id))
+            advocate_uuid = UUID(str(advocate_id))
+
             # Get document
-            document = db.query(Document).filter(Document.id == document_id).first()
+            document = (
+                db.query(Document)
+                .join(Case, Case.id == Document.case_id)
+                .filter(
+                    Document.id == doc_uuid,
+                    Case.advocate_id == advocate_uuid,
+                )
+                .first()
+            )
             
             if not document:
                 return "Document not found"

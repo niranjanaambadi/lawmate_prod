@@ -206,7 +206,7 @@ class User(Base):
     # server_default ensures raw SQL INSERTs also get is_active=TRUE, not NULL
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     is_verified = Column(Boolean, nullable=False, default=False)
-    profile_verified_at = Column(TIMESTAMP, nullable=True)
+    profile_verified_at = Column(TIMESTAMP, nullable=True) # set when KHC identity OTP is confirmed
     
     # Timestamps
     created_at = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)

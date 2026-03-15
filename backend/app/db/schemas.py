@@ -72,7 +72,7 @@ class UserResponse(UserBase):
     created_at: datetime
     last_login_at: Optional[datetime]
     preferences: Dict[str, Any]
-    
+
     class Config:
         from_attributes = True
 
@@ -84,7 +84,7 @@ class UserOut(UserBase):
     is_verified: bool
     profile_verified_at: Optional[datetime] = None
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 

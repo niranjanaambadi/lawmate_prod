@@ -333,13 +333,18 @@ async def razorpay_webhook(
     body_bytes = await request.body()
 
     # Verify webhook signature when secret is configured (always do this in production)
-    if settings.RAZORPAY_WEBHOOK_SECRET and x_razorpay_signature:
+    webhook_secret = (settings.RAZORPAY_WEBHOOK_SECRET or "").strip()
+    if webhook_secret:
+        if not x_razorpay_signature:
+            logger.warning("Razorpay webhook missing signature header — request rejected")
+            raise HTTPException(400, "Missing webhook signature")
+
         expected = hmac.new(
-            settings.RAZORPAY_WEBHOOK_SECRET.encode(),
+            webhook_secret.encode(),
             body_bytes,
             hashlib.sha256,
         ).hexdigest()
-        if not hmac.compare_digest(expected, x_razorpay_signature):
+        if not hmac.compare_digest(expected, x_razorpay_signature.strip()):
             logger.warning("Razorpay webhook signature mismatch — request rejected")
             raise HTTPException(400, "Invalid webhook signature")
 

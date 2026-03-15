@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from app.db.database import get_db
-from app.db.models import AIAnalysis, Case, User
+from app.db.models import AIAnalysis, Case, Document, User
 from app.db.schemas import AIAnalysisResponse
 from app.api.deps import get_current_user
 from app.services.ai_service import ai_service
@@ -128,9 +128,25 @@ def chat_with_document(
     """
     Chat with a document using Claude
     """
+    document = (
+        db.query(Document)
+        .join(Case, Case.id == Document.case_id)
+        .filter(
+            Document.id == document_id,
+            Case.advocate_id == current_user.id,
+        )
+        .first()
+    )
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
     try:
         response = ai_service.chat_with_document(
             document_id,
+            str(current_user.id),
             message,
             conversation_history,
             db

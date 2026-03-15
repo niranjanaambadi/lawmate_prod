@@ -27,9 +27,11 @@ class CauseListTool(BaseTool):
 
     description = (
         "Returns the lawyer's cause list (cases listed for hearing) for a given date. "
+        "Data from precomputed DB (daily_cause_lists). "
         "Defaults to today if no date is provided. "
         "Use when the lawyer asks 'what cases do I have today/tomorrow', "
-        "'how many cases am I appearing in', or any schedule-related question."
+        "'how many cases am I appearing in', or any schedule-related question. "
+        "Prefer get_advocate_cause_list for today's item number and court hall."
     )
 
     input_schema = {

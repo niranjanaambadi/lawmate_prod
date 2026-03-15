@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str
     AWS_REGION: str = "ap-south-1"
     BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    # Model used exclusively by the LawMate AI chat agent (ChatWidget).
+    # Use a Bedrock cross-region inference profile ARN for Claude 4.x models.
+    # Example: us.anthropic.claude-sonnet-4-5-20250514-v1:0
+    # Falls back to BEDROCK_MODEL_ID if not set.
+    CHAT_AGENT_MODEL_ID: str = "us.anthropic.claude-sonnet-4-5-20250514-v1:0"
     HEARING_DAY_BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
     CAUSELIST_BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
     ANTHROPIC_API_KEY: str = ""

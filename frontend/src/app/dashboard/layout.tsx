@@ -39,7 +39,7 @@ export default function DashboardLayout({
   const isSettingsPath = pathname?.startsWith("/dashboard/settings");
   // Gate all non-settings pages when trial has expired
   const isGated = trialExpired && !isActive && !isSettingsPath;
-  const [fullName, setFullName] = useState("");
+  const [fullName, setFullName] = useState(user?.khc_advocate_name ?? "");
   const [verifyVia, setVerifyVia] = useState<"phone" | "email">("phone");
   const [otp, setOtp] = useState("");
   const [step, setStep] = useState<"identity" | "otp">("identity");
@@ -51,7 +51,7 @@ export default function DashboardLayout({
   const [verifyError, setVerifyError] = useState<string | null>(null);
 
   const needsProfileVerification = useMemo(
-    () => Boolean(user && !user.profile_verified_at && !user.is_verified),
+    () => Boolean(user && !user.profile_verified_at),
     [user]
   );
 

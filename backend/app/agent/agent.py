@@ -44,7 +44,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-BEDROCK_MODEL_ID = (settings.BEDROCK_MODEL_ID or "").strip() or "anthropic.claude-3-haiku-20240307-v1:0"
+# Chat agent uses CHAT_AGENT_MODEL_ID; falls back to BEDROCK_MODEL_ID for backward compat.
+BEDROCK_MODEL_ID = (
+    (settings.CHAT_AGENT_MODEL_ID or "").strip()
+    or (settings.BEDROCK_MODEL_ID or "").strip()
+    or "us.anthropic.claude-sonnet-4-5-20250514-v1:0"
+)
 AWS_REGION       = settings.AWS_REGION
 
 # Safety limit — prevents infinite tool-call loops
@@ -391,8 +396,8 @@ async def _call_bedrock(
             "tools": [{"toolSpec": t} for t in tools],
         },
         "inferenceConfig": {
-            "maxTokens":   2048,
-            "temperature": 0.5,
+            "maxTokens":   4096,
+            "temperature": 0.2,
         },
     }
 
