@@ -373,8 +373,8 @@ async def _run_search_indiankanoon(inputs: dict) -> dict:
 
 async def _run_search_web(inputs: dict) -> dict:
     """
-    Tavily web search — last resort for precedent finding.
-    Scoped to legal domains configured in TAVILY_ALLOWED_DOMAINS.
+    Firecrawl web search — last resort for precedent finding.
+    Scoped to legal domains configured in FIRECRAWL_ALLOWED_DOMAINS.
     """
     from app.core.config import settings
 
@@ -401,7 +401,7 @@ async def _run_search_web(inputs: dict) -> dict:
         "include_images":      False,
     }
 
-    allowed = settings.tavily_allowed_domains_list
+    allowed = settings.firecrawl_allowed_domains_list
     if allowed:
         payload["include_domains"] = allowed
 

@@ -120,10 +120,19 @@ class Settings(BaseSettings):
     CAPTCHA_ENABLED: bool = True
     TWOCAPTCHA_API_KEY: str = ""
 
-    # Tavily web search (agent fallback)
+    # Tavily web search (legacy — replaced by Firecrawl for agent search)
     TAVILY_API_KEY: str = ""
     TAVILY_MAX_RESULTS: int = 5
-    TAVILY_ALLOWED_DOMAINS: str = ""
+
+    # Firecrawl — agent web search (replaces Tavily) and URL reading tool
+    FIRECRAWL_API_KEY: str = ""
+    # Max chars returned from a single URL scrape (keeps context window manageable)
+    FIRECRAWL_MAX_CONTENT_CHARS: int = 12000
+    # Max results returned by firecrawl search
+    FIRECRAWL_SEARCH_MAX_RESULTS: int = 5
+    # Comma-separated list of domains search_web and read_url are restricted to.
+    # Example: livelaw.in,barandbench.com,indiankanoon.org,sci.gov.in
+    FIRECRAWL_ALLOWED_DOMAINS: str = ""
 
     # OTP delivery
     OTP_SMS_PROVIDER: str = "dev"   # dev | twilio
@@ -228,13 +237,13 @@ class Settings(BaseSettings):
    
 
     @property
-    def tavily_allowed_domains_list(self) -> List[str]:
+    def firecrawl_allowed_domains_list(self) -> List[str]:
         """
         Parse comma-separated allowed domains or URLs into normalized hostnames.
         Example env:
-          TAVILY_ALLOWED_DOMAINS=barandbench.com,https://main.sci.gov.in/path
+          FIRECRAWL_ALLOWED_DOMAINS=barandbench.com,https://main.sci.gov.in/path
         """
-        raw = (self.TAVILY_ALLOWED_DOMAINS or "").strip()
+        raw = (self.FIRECRAWL_ALLOWED_DOMAINS or "").strip()
         if not raw:
             return []
 

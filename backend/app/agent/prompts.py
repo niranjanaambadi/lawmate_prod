@@ -231,8 +231,13 @@ DECISION RULES — use these to pick the right tool:
   "Draft a writ petition / affidavit / memo"
       → draft_document
 
+  "Read this judgment" / "Summarise this article" / [lawyer pastes a URL]
+      → read_url  (fetches full page markdown from trusted legal domains)
+      → Use BEFORE search_web when you already have a specific URL
+
   "What is the latest news on X?" / "Check if Y is still law?"
-      → search_web  (last resort only)
+      → search_web  (Firecrawl search — returns full article content, not snippets)
+      → last resort only; use after internal tools are insufficient
 
 WHEN NOT TO CALL A TOOL:
 - General doctrine questions ("What is Article 21?", "Explain res judicata")

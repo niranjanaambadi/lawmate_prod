@@ -107,7 +107,7 @@ async def create_upload_job(
     if not pdf_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    if not pdf_bytes.startswith(b"%PDF"):
+    if b"%PDF" not in pdf_bytes[:1024]:
         raise HTTPException(
             status_code=400,
             detail="The uploaded file does not appear to be a valid PDF.",

@@ -23,6 +23,7 @@ type Step = "form" | "privacy" | "terms";
 
 export default function SignUpPage() {
   const { register } = useAuth();
+
   const [step, setStep] = useState<Step>("form");
   const [formData, setFormData] = useState({
     email: "",
@@ -53,17 +54,12 @@ export default function SignUpPage() {
       setError(validationError);
       return;
     }
-    // Open Privacy Policy modal first
     setStep("privacy");
   };
 
-  const handlePrivacyAgree = () => {
-    // Privacy Policy accepted — show Terms of Use next
-    setStep("terms");
-  };
+  const handlePrivacyAgree = () => setStep("terms");
 
   const handleTermsAgree = async () => {
-    // Both documents accepted — proceed with registration
     setStep("form");
     setLoading(true);
     try {
@@ -74,6 +70,7 @@ export default function SignUpPage() {
         khc_advocate_name: formData.khcAdvocateName.trim(),
         mobile: formData.mobile.trim() || undefined,
       });
+      // register() stores the token and redirects to /dashboard automatically
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
@@ -81,9 +78,7 @@ export default function SignUpPage() {
     }
   };
 
-  const handleModalCancel = () => {
-    setStep("form");
-  };
+  const handleModalCancel = () => setStep("form");
 
   return (
     <>
@@ -143,6 +138,9 @@ export default function SignUpPage() {
                 placeholder="+91 98765 43210"
                 disabled={loading}
               />
+              <p className="text-xs text-muted-foreground">
+                Providing a mobile number lets you receive the identity OTP via SMS.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
