@@ -215,7 +215,12 @@ class RosterService:
         return meta
 
     def get_latest_roster_html(self) -> Optional[str]:
-        """Return the pre-generated HTML for the latest roster, or None if not yet available."""
+        """
+        Return the pre-generated HTML for the latest roster.
+        If HTML is missing but the PDF already exists in S3 (e.g. first deploy after HTML
+        support was added), generate it on-demand so the page works immediately without
+        requiring a manual Refresh.
+        """
         meta = self._read_latest_meta()
         if not meta:
             return None
@@ -225,6 +230,22 @@ class RosterService:
             return obj["Body"].read().decode("utf-8")
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
-            if code in {"NoSuchKey", "404"}:
-                return None
-            raise
+            if code not in {"NoSuchKey", "404"}:
+                raise
+
+        # HTML missing — backfill from the existing PDF in S3.
+        logger.info("Roster HTML missing, generating from stored PDF: %s", meta.get("s3Key"))
+        try:
+            pdf_obj = self.s3.get_object(Bucket=self.bucket, Key=meta["s3Key"])
+            pdf_bytes = pdf_obj["Body"].read()
+            self._store_html(pdf_bytes, html_key, meta)
+            self._put_object(
+                self._key("latest.json"),
+                json.dumps(meta, ensure_ascii=True).encode("utf-8"),
+                "application/json",
+            )
+            obj = self.s3.get_object(Bucket=self.bucket, Key=html_key)
+            return obj["Body"].read().decode("utf-8")
+        except Exception:
+            logger.exception("Roster HTML on-demand backfill failed")
+            return None
