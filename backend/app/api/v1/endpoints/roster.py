@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import HTMLResponse
 
 from app.core.logger import logger
@@ -18,15 +18,23 @@ def get_latest_roster():
         raise HTTPException(status_code=502, detail=f"Failed to fetch latest roster: {str(exc)}")
 
 
-@router.post("/sync")
-def sync_roster():
-    """Force sync latest roster from Kerala High Court → s3://lawmate-khc-prod/roster/."""
+def _run_sync() -> None:
     try:
-        service = RosterService()
-        return {"ok": True, "data": service.sync_latest_roster()}
-    except Exception as exc:
-        logger.exception("Failed to sync roster")
-        raise HTTPException(status_code=502, detail=f"Failed to sync roster: {str(exc)}")
+        RosterService().sync_latest_roster()
+        logger.info("Background roster sync completed")
+    except Exception:
+        logger.exception("Background roster sync failed")
+
+
+@router.post("/sync")
+def sync_roster(background_tasks: BackgroundTasks):
+    """
+    Kick off a background roster sync and return 200 immediately.
+    The sync (KHC fetch + PDF download + HTML generation + S3 upload) can take
+    up to a few minutes, so it must not block the HTTP response.
+    """
+    background_tasks.add_task(_run_sync)
+    return {"ok": True, "status": "sync_started"}
 
 
 @router.get("/html", response_class=HTMLResponse)

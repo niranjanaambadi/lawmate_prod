@@ -41,9 +41,14 @@ function formatDate(value: string | null | undefined): string {
   });
 }
 
+// How long (ms) to wait after triggering a background sync before re-fetching.
+// The backend fires KHC fetch + PDF download + HTML gen + S3 upload in the background.
+const SYNC_SETTLE_MS = 20_000;
+
 export default function RosterPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncCountdown, setSyncCountdown] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RosterApiResponse | null>(null);
   const [selectedUrl, setSelectedUrl] = useState<string>("");
@@ -51,8 +56,7 @@ export default function RosterPage() {
   const [htmlLoading, setHtmlLoading] = useState(true);
 
   const loadRoster = async (forceRefresh = false) => {
-    if (forceRefresh) setRefreshing(true);
-    else setLoading(true);
+    if (!forceRefresh) setLoading(true);
     setError(null);
 
     try {
@@ -70,7 +74,6 @@ export default function RosterPage() {
       setSelectedUrl("");
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
@@ -88,8 +91,23 @@ export default function RosterPage() {
   };
 
   const handleRefresh = async () => {
+    setRefreshing(true);
+    setError(null);
+
+    // 1. Trigger background sync + get current metadata (returns immediately).
     await loadRoster(true);
-    await loadHtml();
+
+    // 2. Count down while the background job runs on the server.
+    const steps = SYNC_SETTLE_MS / 1000;
+    for (let i = steps; i > 0; i--) {
+      setSyncCountdown(i);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    setSyncCountdown(null);
+
+    // 3. Re-fetch metadata + HTML now that the sync has had time to complete.
+    await Promise.all([loadRoster(), loadHtml()]);
+    setRefreshing(false);
   };
 
   useEffect(() => {
@@ -142,7 +160,11 @@ export default function RosterPage() {
             className="gap-1.5"
           >
             <RefreshCcw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-            {refreshing ? "Syncing…" : "Refresh"}
+            {syncCountdown !== null
+              ? `Syncing… ${syncCountdown}s`
+              : refreshing
+                ? "Syncing…"
+                : "Refresh"}
           </Button>
         </div>
       </div>
