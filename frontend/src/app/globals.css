@@ -56,3 +56,15 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ── Print styles: only the draft editor content prints ─────────────────── */
+@media print {
+  body > *                      { display: none !important; }
+  .drafting-print-zone          { display: block !important; }
+  .drafting-print-zone          { position: fixed; inset: 0; background: white; padding: 2cm; font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.6; color: #000; }
+  .drafting-print-zone h1       { font-size: 16pt; font-weight: bold; margin: 0 0 12pt; }
+  .drafting-print-zone h2       { font-size: 14pt; font-weight: bold; margin: 12pt 0 8pt; }
+  .drafting-print-zone p        { margin: 0 0 8pt; }
+  .drafting-print-zone ul,
+  .drafting-print-zone ol       { margin: 0 0 8pt; padding-left: 20pt; }
+}

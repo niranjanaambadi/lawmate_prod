@@ -1803,3 +1803,80 @@ class DocComparison(Base):
     
 #     def __repr__(self):
 #         return f"<MultipartUploadSession {self.upload_id}>"
+
+
+# ============================================================================
+# DRAFTING AI
+# ============================================================================
+
+class Workspace(Base):
+    """Persistent drafting workspace owned by one user."""
+    __tablename__ = "workspaces"
+
+    id                   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id              = Column(String, nullable=False, index=True)
+    label                = Column(String(255), nullable=False, default="Untitled")
+    case_context         = Column(JSONB, nullable=True)
+    conversation_history = Column(JSONB, nullable=False, default=list, server_default="'[]'::jsonb")
+    created_at           = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+    updated_at           = Column(TIMESTAMP, nullable=False, default=datetime.utcnow,
+                                  onupdate=datetime.utcnow)
+
+    documents = relationship("WorkspaceDocument", back_populates="workspace",
+                             cascade="all, delete-orphan", lazy="select")
+    drafts    = relationship("WorkspaceDraft", back_populates="workspace",
+                             cascade="all, delete-orphan", lazy="select")
+
+    __table_args__ = (
+        Index("ix_workspaces_user_id", "user_id"),
+    )
+
+
+class WorkspaceDocument(Base):
+    """A document uploaded to a drafting workspace."""
+    __tablename__ = "workspace_documents"
+
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id  = Column(UUID(as_uuid=True),
+                           ForeignKey("workspaces.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    filename      = Column(String(512), nullable=False)
+    doc_type      = Column(String(100), nullable=True)
+    s3_key        = Column(String(1024), nullable=False)
+    size_bytes    = Column(Integer, nullable=False)
+    page_count    = Column(Integer, nullable=True)
+    extracted_text = Column(Text, nullable=True)
+    summary       = Column(Text, nullable=True)
+    token_estimate = Column(Integer, nullable=False, default=0)
+    # "full_context" | "summarized"
+    strategy      = Column(String(20), nullable=False, default="full_context")
+    uploaded_at   = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+
+    workspace = relationship("Workspace", back_populates="documents")
+
+    __table_args__ = (
+        Index("ix_workspace_documents_workspace_id", "workspace_id"),
+    )
+
+
+class WorkspaceDraft(Base):
+    """A generated or manually edited draft document in a workspace."""
+    __tablename__ = "workspace_drafts"
+
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True),
+                          ForeignKey("workspaces.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    title        = Column(String(512), nullable=False)
+    doc_type     = Column(String(100), nullable=False)
+    content      = Column(Text, nullable=False)
+    version      = Column(Integer, nullable=False, default=1)
+    created_at   = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+    updated_at   = Column(TIMESTAMP, nullable=False, default=datetime.utcnow,
+                          onupdate=datetime.utcnow)
+
+    workspace = relationship("Workspace", back_populates="drafts")
+
+    __table_args__ = (
+        Index("ix_workspace_drafts_workspace_id", "workspace_id"),
+    )

@@ -20,6 +20,7 @@ import {
   BookOpenCheck,
   GitCompare,
   HelpCircle,
+  PenTool,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +40,7 @@ const baseNav = [
   { name: "Judgement Analyzer AI", href: "/dashboard/legal-insight", icon: BookOpen },
   { name: "Case Prep AI", href: "/dashboard/case-prep", icon: BookOpenCheck },
   { name: "Doc Comparison AI", href: "/dashboard/doc-compare", icon: GitCompare },
+  { name: "Drafting AI",        href: "/dashboard/drafting",    icon: PenTool },
 ];
 const hearingDayNav = hearingDayEnabled
   ? [{ name: "Hearing Day", href: "/dashboard/hearing-day", icon: Gavel }]

@@ -33,14 +33,13 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str
     AWS_SECRET_ACCESS_KEY: str
     AWS_REGION: str = "ap-south-1"
-    BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
-    # Model used exclusively by the LawMate AI chat agent (ChatWidget).
-    # Use a Bedrock cross-region inference profile ARN for Claude 4.x models.
-    # Example: us.anthropic.claude-sonnet-4-5-20250514-v1:0
+    # Application inference profile: lawmate-fast (Claude Haiku 4.5 — global profile)
+    BEDROCK_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"
+    # Application inference profile: lawmate-analysis (APAC Claude Sonnet)
     # Falls back to BEDROCK_MODEL_ID if not set.
-    CHAT_AGENT_MODEL_ID: str = "us.anthropic.claude-sonnet-4-5-20250514-v1:0"
-    HEARING_DAY_BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
-    CAUSELIST_BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    CHAT_AGENT_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/k2co558c4qi2"
+    HEARING_DAY_BEDROCK_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"
+    CAUSELIST_BEDROCK_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"
     ANTHROPIC_API_KEY: str = ""
     CAUSELIST_ANTHROPIC_MODEL: str = "claude-haiku-4-5-20251001"
 
@@ -203,6 +202,23 @@ class Settings(BaseSettings):
     # BDA document extraction — set profile ARN to enable; falls back to PyMuPDF
     BDA_PROFILE_ARN:      str = ""
     BDA_OUTPUT_S3_PREFIX: str = "bda-output"
+
+    # ── Drafting AI ───────────────────────────────────────────────────────────
+    # Model for workspace chat, context extraction and draft generation.
+    # Application inference profile: lawmate-drafting (APAC Claude 3.7 Sonnet)
+    DRAFTING_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/fpphe4c5lxbz"
+    # Lighter model for doc classification / single-turn summarisation.
+    # Defaults to BEDROCK_MODEL_ID (Claude Haiku) at runtime if blank.
+    DRAFTING_HAIKU_MODEL_ID: str = ""
+    # Per-user workspace cap (HTTP 409 if exceeded)
+    DRAFTING_MAX_WORKSPACES: int = 5
+    # Per-workspace document cap
+    DRAFTING_MAX_DOCS_PER_WORKSPACE: int = 20
+    # Max file size in MB accepted for upload
+    DRAFTING_MAX_FILE_MB: int = 50
+    # Total token budget below which all doc text is sent as full context.
+    # Above this threshold the service switches to hybrid RAG via Bedrock KB.
+    DRAFTING_FULL_CONTEXT_TOKEN_LIMIT: int = 800_000
 
     # Feature flags
     HEARING_DAY_ENABLED: bool = True

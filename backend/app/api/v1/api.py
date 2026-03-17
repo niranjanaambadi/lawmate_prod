@@ -163,3 +163,17 @@ if HAS_DOC_COMPARE:
         prefix="/doc-compare",
         tags=["Document Comparison"],
     )
+
+# Drafting AI
+try:
+    from app.api.v1.endpoints import drafting as drafting_endpoint
+    HAS_DRAFTING = True
+except ImportError:
+    HAS_DRAFTING = False
+
+if HAS_DRAFTING:
+    api_router.include_router(
+        drafting_endpoint.router,
+        prefix="/drafting",
+        tags=["Drafting AI"],
+    )

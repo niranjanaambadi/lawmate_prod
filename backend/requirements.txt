@@ -34,6 +34,7 @@ pypdf==3.17.4
 reportlab==4.0.9
 pymupdf==1.24.10
 pytesseract==0.3.10
+pdf2image>=1.17.0
 Pillow==10.4.0
 
 # Testing (Optional)

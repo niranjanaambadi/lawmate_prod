@@ -722,3 +722,60 @@ model LegalInsightResult {
   @@index([jobId], map: "ix_legal_insight_results_job_id")
   @@map("legal_insight_results")
 }
+
+// ============================================================================
+// DRAFTING AI
+// ============================================================================
+
+/// A persistent drafting workspace owned by one user.
+model Workspace {
+  id                  String              @id @default(uuid()) @db.Uuid
+  userId              String              @map("user_id") @db.Uuid
+  label               String              @default("Untitled") @db.VarChar(255)
+  caseContext         Json?               @map("case_context") @db.JsonB
+  conversationHistory Json                @map("conversation_history") @db.JsonB @default("[]")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @default(now()) @updatedAt @map("updated_at")
+  documents           WorkspaceDocument[]
+  drafts              WorkspaceDraft[]
+
+  @@index([userId], map: "ix_workspaces_user_id")
+  @@map("workspaces")
+}
+
+/// A document uploaded to a drafting workspace.
+model WorkspaceDocument {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  filename      String    @db.VarChar(512)
+  docType       String?   @map("doc_type") @db.VarChar(100)
+  s3Key         String    @map("s3_key") @db.VarChar(1024)
+  sizeBytes     Int       @map("size_bytes")
+  pageCount     Int?      @map("page_count")
+  extractedText String?   @map("extracted_text")
+  summary       String?
+  tokenEstimate Int       @default(0) @map("token_estimate")
+  /// "full_context" or "summarized"
+  strategy      String    @default("full_context") @db.VarChar(20)
+  uploadedAt    DateTime  @default(now()) @map("uploaded_at")
+
+  @@index([workspaceId], map: "ix_workspace_documents_workspace_id")
+  @@map("workspace_documents")
+}
+
+/// A generated (or saved) draft document in a workspace.
+model WorkspaceDraft {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String    @db.VarChar(512)
+  docType     String    @map("doc_type") @db.VarChar(100)
+  content     String
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([workspaceId], map: "ix_workspace_drafts_workspace_id")
+  @@map("workspace_drafts")
+}

@@ -1978,3 +1978,352 @@ export async function downloadComparisonMemo(
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+
+// ============================================================================
+// DRAFTING AI
+// ============================================================================
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface DraftingWorkspace {
+  id:                  string;
+  userId:              string;
+  label:               string;
+  caseContext:         Record<string, unknown> | null;
+  conversationHistory: { role: string; content: string }[];
+  createdAt:           string;
+  updatedAt:           string;
+  documents:           DraftingDocument[];
+  drafts:              DraftingDraft[];
+}
+
+export interface DraftingDocument {
+  id:            string;
+  workspaceId:   string;
+  filename:      string;
+  docType:       string | null;
+  s3Key:         string;
+  sizeBytes:     number;
+  pageCount:     number | null;
+  tokenEstimate: number;
+  strategy:      "full_context" | "summarized";
+  uploadedAt:    string;
+}
+
+export interface DraftingDraft {
+  id:          string;
+  workspaceId: string;
+  title:       string;
+  docType:     string;
+  content:     string;
+  version:     number;
+  createdAt:   string;
+  updatedAt:   string;
+}
+
+// ── Workspace CRUD ────────────────────────────────────────────────────────────
+
+export async function listWorkspaces(token: string): Promise<DraftingWorkspace[]> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/drafting/workspaces`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function createWorkspace(label: string, token: string): Promise<DraftingWorkspace> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/drafting/workspaces`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body:    JSON.stringify({ label }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateWorkspace(
+  id: string,
+  patch: { label?: string; caseContext?: Record<string, unknown> },
+  token: string,
+): Promise<DraftingWorkspace> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/drafting/workspaces/${id}`, {
+    method:  "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body:    JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteWorkspace(id: string, token: string): Promise<void> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/drafting/workspaces/${id}`, {
+    method:  "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+export async function uploadWorkspaceDocument(
+  workspaceId: string,
+  file: File,
+  token: string,
+): Promise<DraftingDocument> {
+  const baseUrl = getBaseUrl();
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/documents`, {
+    method:  "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body:    form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteWorkspaceDocument(
+  workspaceId: string,
+  docId: string,
+  token: string,
+): Promise<void> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(
+    `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/documents/${docId}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+}
+
+/** Delete ALL documents in a workspace and reset its case context. */
+export async function clearWorkspaceDocuments(
+  workspaceId: string,
+  token: string,
+): Promise<void> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(
+    `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/documents`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+}
+
+// ── Context extraction ────────────────────────────────────────────────────────
+
+export async function extractWorkspaceContext(
+  workspaceId: string,
+  token: string,
+): Promise<Record<string, unknown>> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(
+    `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/extract-context`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.caseContext ?? {};
+}
+
+// ── SSE streaming chat ────────────────────────────────────────────────────────
+
+/**
+ * streamDraftingChat
+ *
+ * Opens an SSE stream to POST /api/v1/drafting/workspaces/{id}/chat/stream.
+ * Returns a cleanup function that aborts the stream.
+ */
+export function streamDraftingChat(
+  workspaceId:         string,
+  message:             string,
+  history:             { role: string; content: string }[],
+  token:               string,
+  handlers: {
+    onDelta:              (text: string) => void;
+    onThinking?:          (text: string) => void;
+    onCitedDocs?:         (docIds: string[]) => void;
+    onRecommendations?:   (items: string[]) => void;
+    onWarning?:           (msg: string) => void;
+    onContextMismatch?:   (reason: string) => void;
+    onDone:               (fullText: string) => void;
+    onError:              (msg: string) => void;
+  },
+  skipShiftDetection = false,
+): () => void {
+  const controller = new AbortController();
+
+  const baseUrl = (
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_API_URL || ""
+      : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  ).replace(/\/$/, "");
+
+  (async () => {
+    try {
+      const res = await fetch(
+        `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/chat/stream`,
+        {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body:    JSON.stringify({ message, history, skip_shift_detection: skipShiftDetection }),
+          signal:  controller.signal,
+        },
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        handlers.onError((err as { detail?: string }).detail || res.statusText);
+        return;
+      }
+
+      const reader  = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let   buffer  = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            switch (event.type) {
+              case "text_delta":        handlers.onDelta(event.text ?? "");                      break;
+              case "thinking_delta":    handlers.onThinking?.(event.text ?? "");                 break;
+              case "cited_docs":        handlers.onCitedDocs?.(event.doc_ids ?? []);             break;
+              case "recommendations":   handlers.onRecommendations?.(event.items ?? []);         break;
+              case "warning":           handlers.onWarning?.(event.message ?? "");               break;
+              case "context_mismatch":  handlers.onContextMismatch?.(event.reason ?? "");        break;
+              case "done":              handlers.onDone(event.full_text ?? "");                  break;
+              case "error":             handlers.onError(event.message ?? "Stream error");       break;
+            }
+          } catch {
+            // non-JSON line — skip
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name !== "AbortError") {
+        handlers.onError(String(err));
+      }
+    }
+  })();
+
+  return () => controller.abort();
+}
+
+// ── Drafts ────────────────────────────────────────────────────────────────────
+
+export async function generateDraft(
+  workspaceId: string,
+  docType:     string,
+  brief:       string,
+  token:       string,
+): Promise<DraftingDraft> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/drafts`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body:    JSON.stringify({ docType, brief }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listDrafts(workspaceId: string, token: string): Promise<DraftingDraft[]> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/drafts`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function getDraft(
+  workspaceId: string,
+  draftId:     string,
+  token:       string,
+): Promise<DraftingDraft> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(
+    `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/drafts/${draftId}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function saveDraft(
+  workspaceId: string,
+  draftId:     string,
+  content:     string,
+  token:       string,
+  title?:      string,
+): Promise<DraftingDraft> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(
+    `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/drafts/${draftId}`,
+    {
+      method:  "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body:    JSON.stringify({ content, title }),
+    },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteDraft(
+  workspaceId: string,
+  draftId:     string,
+  token:       string,
+): Promise<void> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(
+    `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/drafts/${draftId}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+}

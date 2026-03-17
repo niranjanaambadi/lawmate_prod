@@ -45,8 +45,10 @@ PREP_TOOL_SPECS: list[dict] = [
     {
         "name": "search_judgment_kb",
         "description": (
-            "Search the LawMate Judgments Knowledge Base for cached Kerala HC judgments. "
+            "Search the LawMate Judgments Knowledge Base for cached Kerala High Court "
+            "and Supreme Court of India judgments. "
             "This is the fastest source — always try this first. "
+            "Automatically runs multi-query expansion and reranking for best results. "
             "Returns judgment titles, citations, dates, holdings, and source URLs. "
             "If this returns fewer than 2 good results, follow up with search_indiankanoon."
         ),
@@ -58,8 +60,8 @@ PREP_TOOL_SPECS: list[dict] = [
                         "type": "string",
                         "description": (
                             "Legal search query. Be specific — include the legal issue, "
-                            "relevant statute/section, and 'Kerala High Court'. "
-                            "E.g. 'anticipatory bail Section 438 CrPC Kerala High Court'."
+                            "relevant statute/section, and the court name. "
+                            "E.g. 'anticipatory bail Section 438 CrPC Kerala High Court OR Supreme Court'."
                         ),
                     },
                     "max_results": {
@@ -74,7 +76,7 @@ PREP_TOOL_SPECS: list[dict] = [
     {
         "name": "search_indiankanoon",
         "description": (
-            "Search IndianKanoon for live Kerala High Court judgments. "
+            "Search IndianKanoon for live Kerala High Court and Supreme Court of India judgments. "
             "Use when the Knowledge Base returns fewer than 2 results, "
             "or when the user explicitly asks to search IndianKanoon or wants more judgments. "
             "Returns titles, citations, dates, headlines, and source URLs. "
@@ -89,8 +91,8 @@ PREP_TOOL_SPECS: list[dict] = [
                         "description": (
                             "Legal search query for IndianKanoon. "
                             "E.g. 'bail NDPS Act Kerala High Court 2023' or "
-                            "'anticipatory bail Section 438 CrPC'. "
-                            "'Kerala High Court' is added automatically if missing."
+                            "'anticipatory bail Section 438 CrPC Supreme Court'. "
+                            "'Kerala High Court OR Supreme Court of India' is added automatically if missing."
                         ),
                     },
                     "max_results": {
@@ -184,7 +186,7 @@ async def dispatch_prep_tool(tool_name: str, tool_inputs: dict) -> dict:
     Never raises — errors are captured into the result dict.
     """
     handlers = {
-        "search_judgment_kb":    _run_search_judgment_kb,
+        "search_judgment_kb":    _run_search_judgment_kb_multi,
         "search_indiankanoon":   _run_search_indiankanoon,
         "search_web":            _run_search_web,
         "search_legal_resources": _run_search_legal_resources,
@@ -235,7 +237,7 @@ async def _run_search_judgment_kb(inputs: dict) -> dict:
     """
     import boto3
 
-    query       = (inputs.get("query") or "").strip()
+    query       = _scope_query((inputs.get("query") or "").strip())
     max_results = min(int(inputs.get("max_results", 5)), 10)
 
     if not query:
@@ -315,8 +317,7 @@ async def _run_search_indiankanoon(inputs: dict) -> dict:
             "error": "INDIANKANOON_API_TOKEN not configured.",
         }
 
-    # Always scope to Kerala HC
-    scoped_query = query if "kerala" in query.lower() else f"{query} Kerala High Court"
+    scoped_query = _scope_query(query)
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -511,6 +512,101 @@ async def _run_search_legal_resources(inputs: dict) -> dict:
 
 def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", " ", text).strip()
+
+
+def _scope_query(query: str) -> str:
+    """
+    Ensure the query is scoped to Kerala High Court or Supreme Court of India.
+    Appends 'Kerala High Court OR Supreme Court of India' only when neither
+    court is already mentioned.
+    """
+    q = query.lower()
+    if "kerala" in q or "supreme court" in q:
+        return query
+    return f"{query} Kerala High Court OR Supreme Court of India"
+
+
+async def _run_search_judgment_kb_multi(inputs: dict) -> dict:
+    """
+    Enhanced search_judgment_kb handler with multi-query expansion and reranking.
+
+    Pipeline:
+      1. Expand user query into 3-4 targeted legal queries via LLM.
+      2. Retrieve top_k=8 results from Bedrock KB for each expanded query.
+      3. Merge and deduplicate by source_url.
+      4. Rerank the combined candidate set using Cohere Rerank via Bedrock.
+      5. Return top 5 results.
+
+    Falls back gracefully at each step — if expansion or reranking fail,
+    the raw single-query KB results are returned.
+    """
+    import asyncio
+    from app.agent.prep_multi_query import expand_query
+    from app.agent.prep_reranker import rerank
+    from app.core.config import settings
+
+    query = (inputs.get("query") or "").strip()
+    if not query:
+        return {"success": False, "data": None, "error": "query is required"}
+
+    model_id = (settings.CASE_PREP_MODEL_ID or "").strip() or settings.BEDROCK_MODEL_ID
+    region   = settings.AWS_REGION
+
+    # ── Step 1: Multi-query expansion ────────────────────────────────────────
+    queries = await expand_query(query, model_id=model_id, region=region)
+
+    # ── Step 2: Parallel KB retrieval ────────────────────────────────────────
+    # Note: _run_search_judgment_kb uses boto3 (blocking) so gather runs
+    # them sequentially in practice — still yields multi-query coverage.
+    tasks = [
+        _run_search_judgment_kb({"query": q, "max_results": 8})
+        for q in queries
+    ]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # ── Step 3: Merge + deduplicate by source_url ─────────────────────────
+    seen: set[str] = set()
+    candidates: list[dict] = []
+    for r in raw_results:
+        if isinstance(r, dict) and r.get("success"):
+            for item in (r.get("data") or {}).get("results", []):
+                url = item.get("source_url", "")
+                key = url or item.get("title", "")
+                if key and key not in seen:
+                    seen.add(key)
+                    candidates.append(item)
+
+    logger.info(
+        "KB multi-query: %d queries → %d unique candidates", len(queries), len(candidates)
+    )
+
+    if not candidates:
+        return {
+            "success": True,
+            "data": {
+                "query":   query,
+                "results": [],
+                "count":   0,
+                "source":  "LawMate KB (multi-query)",
+            },
+            "error": "No judgments found in KB for this query.",
+        }
+
+    # ── Step 4: Rerank ────────────────────────────────────────────────────
+    top = await rerank(query, candidates, top_k=5, region=region)
+
+    return {
+        "success": True,
+        "data": {
+            "query":          query,
+            "results":        top,
+            "count":          len(top),
+            "source":         "LawMate KB (multi-query + rerank)",
+            "queries_used":   queries,
+            "rerank_applied": True,
+        },
+        "error": None if top else "No results after reranking.",
+    }
 
 
 async def _ingest_to_kb(results: list[dict], query: str) -> None:
