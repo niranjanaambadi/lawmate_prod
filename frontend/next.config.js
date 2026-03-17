@@ -15,11 +15,13 @@ const nextConfig = {
     }
     return config;
   },
-  // 2. Turbopack: only alias canvas on the client; do NOT alias fs — server
-  //    components need the real Node fs to read help-center-pages.md.
+  // 2. Turbopack: alias node-only modules for client bundles (e.g. html-to-docx uses fs).
+  //    resolveAlias only affects client bundles in Next.js — server components
+  //    still get the real Node fs, so help-center-pages.md can be read normally.
   turbopack: {
     resolveAlias: {
       canvas: "./src/lib/empty-module.js",
+      fs:     "./src/lib/empty-module.js",
     },
   },
 };
