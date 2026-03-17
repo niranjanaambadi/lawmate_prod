@@ -5,8 +5,6 @@ import Link from "next/link";
 import { AlertCircle, ExternalLink, FileText, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { PdfViewer } from "@/components/hearing-day/PdfViewer";
 
 type RosterEntry = {
   label: string;
@@ -41,11 +39,8 @@ export default function RosterPage() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RosterApiResponse | null>(null);
   const [selectedUrl, setSelectedUrl] = useState<string>("");
-  const [searchInput, setSearchInput] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [searchHint, setSearchHint] = useState<string | null>(null);
-  const [activePage, setActivePage] = useState<number | undefined>(undefined);
+  const [htmlContent, setHtmlContent] = useState<string>("");
+  const [htmlLoading, setHtmlLoading] = useState(true);
 
   const loadRoster = async (forceRefresh = false) => {
     if (forceRefresh) setRefreshing(true);
@@ -53,19 +48,16 @@ export default function RosterPage() {
     setError(null);
 
     try {
-      const res = await fetch(`/api/kerala-high-court/roster${forceRefresh ? "?refresh=1" : ""}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/kerala-high-court/roster${forceRefresh ? "?refresh=1" : ""}`,
+        { cache: "no-store" },
+      );
       const body = (await res.json()) as RosterApiResponse;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || "Unable to load roster");
       }
       setData(body);
       setSelectedUrl(body.latest?.pdfUrl || body.entries[0]?.pdfUrl || "");
-      setSearchInput("");
-      setSearchQuery("");
-      setSearchHint(null);
-      setActivePage(undefined);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to load roster";
       setError(message);
@@ -77,35 +69,36 @@ export default function RosterPage() {
     }
   };
 
+  const loadHtml = async () => {
+    setHtmlLoading(true);
+    setHtmlContent("");
+    try {
+      const res = await fetch("/api/kerala-high-court/roster/html", { cache: "no-store" });
+      if (res.ok) {
+        setHtmlContent(await res.text());
+      }
+    } catch {
+      // Silently degrade — the "Open official PDF" button remains available.
+    } finally {
+      setHtmlLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    // Run sequentially: sync first (generates new HTML), then reload HTML.
+    await loadRoster(true);
+    await loadHtml();
+  };
+
   useEffect(() => {
     void loadRoster();
+    void loadHtml();
   }, []);
 
   const selectedRoster = useMemo(
-    () => data?.entries.find((entry) => entry.pdfUrl === selectedUrl) ?? data?.latest ?? null,
-    [data, selectedUrl]
+    () => data?.entries.find((e) => e.pdfUrl === selectedUrl) ?? data?.latest ?? null,
+    [data, selectedUrl],
   );
-  const viewerPdfUrl = useMemo(() => {
-    if (!selectedRoster?.pdfUrl) return "";
-    return `/api/pdf-proxy?url=${encodeURIComponent(selectedRoster.pdfUrl)}`;
-  }, [selectedRoster?.pdfUrl]);
-
-  const findInPdf = async () => {
-    const q = searchInput.trim();
-    if (!selectedRoster?.pdfUrl) return;
-    if (!q) {
-      setSearchQuery("");
-      setSearchHint(null);
-      setActivePage(undefined);
-      return;
-    }
-
-    setSearching(true);
-    setSearchHint(null);
-    setSearchQuery(q);
-    setSearchHint("Search highlights matches in the visible pages.");
-    setSearching(false);
-  };
 
   return (
     <div className="space-y-6">
@@ -116,12 +109,16 @@ export default function RosterPage() {
           </div>
           <CardTitle>Kerala High Court Roster</CardTitle>
           <CardDescription>
-            Shows the latest roster PDF available on the High Court website.
+            Shows the latest roster available on the High Court website.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="outline" onClick={() => void loadRoster(true)} disabled={refreshing || loading}>
+            <Button
+              variant="outline"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing || loading}
+            >
               <RefreshCcw className="mr-2 h-4 w-4" />
               {refreshing ? "Refreshing..." : "Refresh"}
             </Button>
@@ -150,7 +147,7 @@ export default function RosterPage() {
                 >
                   {data.entries.map((entry) => (
                     <option key={entry.pdfUrl} value={entry.pdfUrl}>
-                      {entry.parsedDate ? `${formatDate(entry.parsedDate)} - ` : ""}
+                      {entry.parsedDate ? `${formatDate(entry.parsedDate)} — ` : ""}
                       {entry.label}
                     </option>
                   ))}
@@ -158,7 +155,9 @@ export default function RosterPage() {
               </div>
               <div className="space-y-2 rounded-md border bg-slate-50 p-3">
                 <p className="text-sm font-medium">Selected roster date</p>
-                <p className="text-sm text-muted-foreground">{formatDate(selectedRoster?.parsedDate)}</p>
+                <p className="text-sm text-muted-foreground">
+                  {formatDate(selectedRoster?.parsedDate)}
+                </p>
               </div>
             </div>
           ) : null}
@@ -179,67 +178,53 @@ export default function RosterPage() {
         <CardHeader>
           <CardTitle>Roster document</CardTitle>
           <CardDescription>
-            PDF content is shown below. Use open-in-new-tab if the inline viewer is blocked by the source site.
+            Use Ctrl+F / ⌘F inside the document to search. The original PDF is also available below.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {loading ? (
-            <div className="rounded-md border bg-slate-50 p-8 text-center text-sm text-muted-foreground">
-              Loading roster...
+          {selectedRoster ? (
+            <div className="flex flex-wrap gap-3">
+              <Button asChild>
+                <a href={selectedRoster.pdfUrl} target="_blank" rel="noopener noreferrer">
+                  Open official PDF
+                  <ExternalLink className="ml-2 h-4 w-4" />
+                </a>
+              </Button>
+              <Button variant="outline" asChild>
+                <a href={selectedRoster.sourcePage} target="_blank" rel="noopener noreferrer">
+                  Open source page
+                  <ExternalLink className="ml-2 h-4 w-4" />
+                </a>
+              </Button>
             </div>
-          ) : selectedRoster ? (
-            <>
-              <div className="flex flex-wrap gap-3">
-                <Button asChild>
-                  <a href={selectedRoster.pdfUrl} target="_blank" rel="noopener noreferrer">
-                    Open official PDF
-                    <ExternalLink className="ml-2 h-4 w-4" />
-                  </a>
-                </Button>
-                <Button variant="outline" asChild>
-                  <a href={selectedRoster.sourcePage} target="_blank" rel="noopener noreferrer">
-                    Open source page
-                    <ExternalLink className="ml-2 h-4 w-4" />
-                  </a>
-                </Button>
+          ) : null}
+
+          <div className="h-[72vh] min-h-[500px] overflow-hidden rounded-md border bg-slate-100">
+            {loading || htmlLoading ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Loading roster...
               </div>
-              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-slate-50 p-3">
-                <Input
-                  placeholder="Search inside PDF"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="max-w-sm bg-white"
-                />
-                <Button variant="outline" onClick={() => void findInPdf()} disabled={searching}>
-                  {searching ? "Searching..." : "Find"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setSearchInput("");
-                    setSearchQuery("");
-                    setSearchHint(null);
-                    setActivePage(undefined);
-                  }}
-                >
-                  Clear
-                </Button>
-                {searchHint ? <p className="text-sm text-slate-600">{searchHint}</p> : null}
+            ) : htmlContent ? (
+              <iframe
+                srcDoc={htmlContent}
+                sandbox="allow-scripts"
+                className="h-full w-full border-0"
+                title="Kerala High Court Roster"
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+                <p>Roster document view not yet available.</p>
+                {selectedRoster ? (
+                  <Button asChild size="sm">
+                    <a href={selectedRoster.pdfUrl} target="_blank" rel="noopener noreferrer">
+                      Open official PDF
+                      <ExternalLink className="ml-2 h-4 w-4" />
+                    </a>
+                  </Button>
+                ) : null}
               </div>
-              <div className="h-[70vh] min-h-[500px] overflow-hidden rounded-md border bg-slate-100">
-                <PdfViewer
-                  url={viewerPdfUrl}
-                  searchQuery={searchQuery}
-                  activePage={activePage}
-                  pageWidth={980}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="rounded-md border bg-slate-50 p-8 text-center text-sm text-muted-foreground">
-              No roster PDF available right now.
-            </div>
-          )}
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

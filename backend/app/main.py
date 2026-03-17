@@ -367,6 +367,31 @@ async def _doc_comparison_cleanup_loop() -> None:
             await asyncio.sleep(60)
 
 
+async def _roster_sync_loop() -> None:
+    """
+    Check once daily at midnight IST whether a new roster has been posted.
+    sync_latest_roster() compares the SHA-256 checksum of the downloaded PDF
+    against the stored one, so no extra work is done when the roster hasn't changed.
+    HTML is generated (or backfilled) as part of the same sync call.
+    """
+    from app.services.roster_service import RosterService
+
+    while True:
+        try:
+            delay = _seconds_until_next_ist_run(0, 0)
+            logger.info("Roster sync: next check in %.0f s (midnight IST)", delay)
+            await asyncio.sleep(delay)
+            result = RosterService().sync_latest_roster()
+            logger.info(
+                "Roster sync done: checksum=%s lastCheckedAt=%s",
+                result.get("checksum", "?"),
+                result.get("lastCheckedAt", "?"),
+            )
+        except Exception:
+            logger.exception("_roster_sync_loop crashed")
+            await asyncio.sleep(60)
+
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("Lawmate API started")
@@ -382,6 +407,8 @@ async def startup_event():
     app.state.idempotency_cleanup_task    = asyncio.create_task(_idempotency_cleanup_loop())
     # Doc comparison — purge expired rows every hour
     app.state.doc_comparison_cleanup_task = asyncio.create_task(_doc_comparison_cleanup_loop())
+    # Roster — check once daily at midnight IST; syncs only when the PDF has changed
+    app.state.roster_sync_task            = asyncio.create_task(_roster_sync_loop())
     # Note: case-status sync is handled by the live_status_sync Lambda worker,
     #       not by an in-process loop. See /api/v1/live-status-worker/run-due.
 
@@ -397,6 +424,7 @@ async def shutdown_event():
         "advocate_causelist_task",
         "idempotency_cleanup_task",
         "doc_comparison_cleanup_task",
+        "roster_sync_task",
     ]:
         task = getattr(app.state, task_name, None)
         if task:

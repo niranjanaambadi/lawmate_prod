@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 
 from app.core.config import settings
 from app.core.logger import logger
+from app.services.roster_html_service import RosterHtmlService
 
 
 @dataclass
@@ -155,9 +156,14 @@ class RosterService:
         latest_pdf_key = self._key("latest.pdf")
         latest_meta_key = self._key("latest.json")
 
+        html_key = self._key("latest.html")
+
         latest_existing = self._read_latest_meta()
         if latest_existing and latest_existing.get("checksum") == checksum:
             latest_existing["lastCheckedAt"] = now
+            # Backfill HTML for older syncs that pre-date HTML support
+            if not latest_existing.get("htmlS3Key"):
+                self._store_html(pdf_bytes, html_key, latest_existing)
             self._put_object(
                 latest_meta_key,
                 json.dumps(latest_existing, ensure_ascii=True).encode("utf-8"),
@@ -169,7 +175,7 @@ class RosterService:
         self._put_object(archival_key, pdf_bytes, "application/pdf")
         self._put_object(latest_pdf_key, pdf_bytes, "application/pdf")
 
-        meta = {
+        meta: dict[str, Any] = {
             "label": active.label,
             "effectiveDate": active.effective_date,
             "sourcePage": active.source_page,
@@ -181,6 +187,7 @@ class RosterService:
             "fetchedAt": now,
             "lastCheckedAt": now,
         }
+        self._store_html(pdf_bytes, html_key, meta)
         self._put_object(
             latest_meta_key,
             json.dumps(meta, ensure_ascii=True).encode("utf-8"),
@@ -190,9 +197,34 @@ class RosterService:
         meta["signedUrl"] = self._presigned_url(latest_pdf_key)
         return meta
 
+    def _store_html(self, pdf_bytes: bytes, html_key: str, meta: dict[str, Any]) -> None:
+        """Generate styled HTML from the PDF and store in S3. Best-effort — does not raise."""
+        try:
+            html = RosterHtmlService().convert(pdf_bytes)
+            self._put_object(html_key, html.encode("utf-8"), "text/html; charset=utf-8")
+            meta["htmlS3Key"] = html_key
+            logger.info("Roster HTML stored: %s", html_key)
+        except Exception:
+            logger.exception("Roster HTML generation failed — PDF sync unaffected")
+
     def get_latest_roster(self) -> dict[str, Any]:
         meta = self._read_latest_meta()
         if not meta:
             return self.sync_latest_roster()
         meta["signedUrl"] = self._presigned_url(meta["s3Key"])
         return meta
+
+    def get_latest_roster_html(self) -> Optional[str]:
+        """Return the pre-generated HTML for the latest roster, or None if not yet available."""
+        meta = self._read_latest_meta()
+        if not meta:
+            return None
+        html_key = meta.get("htmlS3Key") or self._key("latest.html")
+        try:
+            obj = self.s3.get_object(Bucket=self.bucket, Key=html_key)
+            return obj["Body"].read().decode("utf-8")
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in {"NoSuchKey", "404"}:
+                return None
+            raise
