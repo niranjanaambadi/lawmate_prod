@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     BEDROCK_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"
     # Application inference profile: lawmate-analysis (APAC Claude Sonnet)
     # Falls back to BEDROCK_MODEL_ID if not set.
-    CHAT_AGENT_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/k2co558c4qi2"
+    CHAT_AGENT_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/2ghdq782yd40"
     HEARING_DAY_BEDROCK_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"
     CAUSELIST_BEDROCK_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"
     ANTHROPIC_API_KEY: str = ""
@@ -206,7 +206,7 @@ class Settings(BaseSettings):
     # ── Drafting AI ───────────────────────────────────────────────────────────
     # Model for workspace chat, context extraction and draft generation.
     # Application inference profile: lawmate-drafting (APAC Claude 3.7 Sonnet)
-    DRAFTING_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/fpphe4c5lxbz"
+    DRAFTING_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/qs2ssqj6btjj"
     # Lighter model for doc classification / single-turn summarisation.
     # Defaults to BEDROCK_MODEL_ID (Claude Haiku) at runtime if blank.
     DRAFTING_HAIKU_MODEL_ID: str = ""
