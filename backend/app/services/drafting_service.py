@@ -63,6 +63,25 @@ _THINKING_KEYWORDS = {
     "missing", "checklist", "strategy", "weakness", "strength",
 }
 
+# Models that support extended thinking via Bedrock additionalModelRequestFields.
+# DeepSeek and Claude < 3.7 do NOT support it; passing the field causes a
+# ValidationException ("thinking.enabled.budget_tokens: Field required" or similar).
+# Application inference profile ARNs are included because the LawMate drafting
+# profile is backed by Claude 3.7 Sonnet which supports extended thinking.
+_THINKING_CAPABLE_MODEL_PREFIXES = (
+    "us.anthropic.claude-3-7",
+    "anthropic.claude-3-7",
+    "eu.anthropic.claude-3-7",
+    "ap.anthropic.claude-3-7",
+    "arn:aws:bedrock:",          # application-inference-profile ARNs
+)
+
+
+def _model_supports_thinking(model_id: str) -> bool:
+    """Return True only for models known to support extended thinking on Bedrock."""
+    mid = model_id.lower()
+    return any(mid.startswith(p) for p in _THINKING_CAPABLE_MODEL_PREFIXES)
+
 
 def _needs_thinking(text: str) -> bool:
     t = text.lower()
@@ -550,8 +569,12 @@ async def stream_chat(
     convo_messages.append({"role": "user", "content": [{"text": message}]})
 
     # ── Extended thinking ─────────────────────────────────────────────────────
+    # Only enabled when (a) message warrants it AND (b) the active model
+    # supports it.  DeepSeek and older Claude models do NOT support the
+    # `thinking` field — passing it causes a Bedrock ValidationException.
     extra_fields: dict = {}
-    use_thinking = _needs_thinking(message)
+    active_model = _drafting_model()
+    use_thinking = _needs_thinking(message) and _model_supports_thinking(active_model)
     if use_thinking:
         extra_fields = {"thinking": {"type": "enabled", "budgetTokens": 10000}}
 
