@@ -49,6 +49,7 @@ def _build_registry() -> dict[str, BaseTool]:
     _try_register(r, "app.agent.tools.web_search",         "WebSearchTool")
     _try_register(r, "app.agent.tools.read_url",            "ReadUrlTool")
     _try_register(r, "app.agent.tools.advocate_cause_list", "AdvocateCauseListTool")
+    _try_register(r, "app.agent.tools.statute_crosswalk",  "StatuteCrosswalkTool")
     _try_register(r, "app.agent.tools.calendar",           "CreateCalendarEventTool")
     _try_register(r, "app.agent.tools.calendar",           "GetCalendarEventsTool")
     _try_register(r, "app.agent.tools.calendar",           "DeleteCalendarEventTool")

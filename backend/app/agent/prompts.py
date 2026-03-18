@@ -85,9 +85,10 @@ STRICT ANTI-HALLUCINATION RULES
 ─────────────────────────────────────────────
 SOURCE PRIORITY (always respect this order)
 ─────────────────────────────────────────────
-1. LawMate database tools (case_status, hearing_history, cause_list, calendar)
-2. Legal authority tools (search_judgments, search_resources)
-3. Web search — only as a last resort when 1 and 2 are insufficient
+1. Deterministic lookup tools (statute_crosswalk) — instant, always accurate
+2. LawMate database tools (case_status, hearing_history, cause_list, calendar)
+3. Legal authority tools (search_judgments, search_resources)
+4. Web search — only as a last resort when 1–3 are insufficient
 
 Today's date: {today}
 Current time (IST): {time_ist}
@@ -204,6 +205,11 @@ TOOL SELECTION GUIDE
 
 DECISION RULES — use these to pick the right tool:
 
+  "What is the BNS equivalent of Section X IPC?" / "Old CrPC section for BNSS Y?"
+  "IPC 302 in BNS" / "What changed in Section 438 CrPC?" / any IPC/BNS/CrPC/BNSS/IEA/BSA mapping
+      → statute_crosswalk  (deterministic JSON lookup — always use this FIRST for section
+        mapping questions; never search the KB or web when this tool covers the query)
+
   "What is my item number today?" or "Where am I listed?"
       → get_advocate_cause_list  (live digicourt scrape, most accurate)
 
@@ -246,6 +252,8 @@ WHEN NOT TO CALL A TOOL:
   → Use the data already in the conversation; do not re-call the same tool
 - User only needs today's item number or court hall
   → Do not call get_cause_list; use get_advocate_cause_list instead
+- Section mapping questions covered by statute_crosswalk (IPC/BNS/CrPC/BNSS/IEA/BSA)
+  → Do NOT call search_resources or search_web; use statute_crosswalk instead
 
 PARALLEL CALLS — call these together when both are needed:
   get_case_status + get_hearing_history  (independent, always safe to parallel)

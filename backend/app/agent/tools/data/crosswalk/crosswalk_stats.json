@@ -1,0 +1,33 @@
+[
+  {
+    "pair": "BNSS-CrPC",
+    "new_act": "BNSS",
+    "old_act": "CrPC",
+    "total_records": 522,
+    "forward_entries": 522,
+    "reverse_entries": 499,
+    "change_distribution": {
+      "unchanged": 294,
+      "cosmetic": 88,
+      "deleted": 52,
+      "new": 49,
+      "modified": 38,
+      "consolidated": 1
+    }
+  },
+  {
+    "pair": "BSA-IEA",
+    "new_act": "BSA",
+    "old_act": "IEA",
+    "total_records": 174,
+    "forward_entries": 174,
+    "reverse_entries": 172,
+    "change_distribution": {
+      "unchanged": 93,
+      "cosmetic": 45,
+      "deleted": 22,
+      "new": 10,
+      "modified": 4
+    }
+  }
+]
