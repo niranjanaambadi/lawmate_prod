@@ -583,7 +583,8 @@ async def stream_chat(
     active_model = _drafting_model()
     use_thinking = _needs_thinking(message) and _model_supports_thinking(active_model)
     if use_thinking:
-        extra_fields = {"thinking": {"type": "enabled", "budgetTokens": 10000}}
+        # Claude Sonnet 4 on Bedrock uses snake_case budget_tokens (not budgetTokens)
+        extra_fields = {"thinking": {"type": "enabled", "budget_tokens": 10000}}
 
     # ── Stream ────────────────────────────────────────────────────────────────
     try:
@@ -690,10 +691,14 @@ async def generate_draft(
             inferenceConfig={"maxTokens": 16000, "temperature": 0.2},
         )
         if _model_supports_thinking(draft_model):
-            # Extended thinking requires temperature=1 per Bedrock/Anthropic spec
+            # Extended thinking requires temperature=1 per Bedrock/Anthropic spec.
+            # Claude Sonnet 4 on Bedrock uses snake_case budget_tokens (not budgetTokens).
+            # budget_tokens counts against maxTokens, so raise maxTokens to
+            # budget_tokens (10 000) + visible output headroom (16 000) = 26 000.
+            converse_kwargs["inferenceConfig"]["maxTokens"] = 26000
             converse_kwargs["inferenceConfig"]["temperature"] = 1
             converse_kwargs["additionalModelRequestFields"] = {
-                "thinking": {"type": "enabled", "budgetTokens": 10000}
+                "thinking": {"type": "enabled", "budget_tokens": 10000}
             }
         response = client.converse(**converse_kwargs)
         content_blocks = (
