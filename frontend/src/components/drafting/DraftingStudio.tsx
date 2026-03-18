@@ -118,7 +118,7 @@ function plainTextToHtml(raw: string): string {
   // Wrap consecutive <li> items in <ul>
   return parts
     .join("")
-    .replace(/(<li>.*?<\/li>)+/gs, (match) => `<ul>${match}</ul>`);
+    .replace(/(<li>[^]*?<\/li>)+/g, (match) => `<ul>${match}</ul>`);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
