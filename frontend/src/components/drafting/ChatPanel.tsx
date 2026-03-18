@@ -226,10 +226,7 @@ export default function ChatPanel({ workspaceId, token, onDraftFromMessage, disa
               Ask anything about your uploaded documents
             </p>
             <p className="text-xs text-slate-400">
-              or request a draft — e.g.{" "}
-              <span className="italic text-indigo-500">
-                "Draft a bail application based on these documents"
-              </span>
+              or request a draft — e.g. "Draft a bail application based on these documents"
             </p>
           </div>
         )}

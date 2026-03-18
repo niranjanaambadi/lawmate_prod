@@ -5,21 +5,24 @@ import { ChevronDown, ChevronUp, RefreshCw, AlertCircle, CheckSquare, Square } f
 import type { CaseContext } from "@/stores/workspaceStore";
 
 interface Props {
-  caseContext:  CaseContext | null;
-  onRefresh:    () => Promise<void>;
-  isRefreshing: boolean;
+  caseContext:   CaseContext | null;
+  hasDocuments:  boolean;
+  onRefresh:     () => Promise<void>;
+  isRefreshing:  boolean;
 }
 
-export default function IntelligencePanel({ caseContext, onRefresh, isRefreshing }: Props) {
+export default function IntelligencePanel({ caseContext, hasDocuments, onRefresh, isRefreshing }: Props) {
   const [expanded, setExpanded] = useState(true);
   const [checked,  setChecked]  = useState<Record<number, boolean>>({});
 
   if (!caseContext || Object.keys(caseContext).length === 0) {
+    const tipText = hasDocuments
+      ? "💡 Tip: Make sure that the documents on the right are not unrelated to the intended drafting context."
+      : "💡 Tip: Upload documents first so that AI can extract the case context.";
+
     return (
       <div className="px-3 py-2 border-b border-amber-100 bg-amber-50 text-xs flex items-center justify-between gap-2">
-        <span className="text-amber-700 font-medium">
-          💡 Tip: upload documents first so that AI can extract the case context
-        </span>
+        <span className="text-amber-700 font-medium">{tipText}</span>
         <button
           onClick={onRefresh}
           disabled={isRefreshing}

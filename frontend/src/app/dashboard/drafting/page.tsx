@@ -219,6 +219,7 @@ export default function DraftingPage() {
             {/* Intelligence Panel (collapsible) */}
             <IntelligencePanel
               caseContext={currentWs.caseContext}
+              hasDocuments={(currentWs.documents?.length ?? 0) > 0}
               onRefresh={handleRefreshContext}
               isRefreshing={refreshingCtx}
             />
