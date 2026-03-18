@@ -1416,6 +1416,39 @@ Ensure:
 
 
 # ===========================================================================
+# SYSTEM PROMPT BUILDER
+# Wraps KHC_SYSTEM_PROMPT with live date/time and case context.
+# Called by drafting_service.py for every streaming chat session.
+# ===========================================================================
+
+def build_khc_system_prompt(case_context_text: str = "") -> str:
+    """
+    Return the KHC system prompt augmented with today's date/time (IST)
+    and the current workspace case context.
+
+    Args:
+        case_context_text: Pre-formatted case context string from the workspace.
+                           Pass an empty string when no context has been extracted yet.
+
+    Returns:
+        Complete system prompt string ready to pass to Bedrock as a system message.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    date_line = f"\nToday: {now.strftime('%A, %d %B %Y')}  |  Time (IST): {now.strftime('%I:%M %p')}\n"
+
+    ctx_section = (
+        f"\n## ACTIVE WORKSPACE CASE CONTEXT\n\n{case_context_text.strip()}\n"
+        if case_context_text.strip()
+        else "\n## ACTIVE WORKSPACE CASE CONTEXT\n\nNo case context extracted yet — proceed with gap analysis before drafting.\n"
+    )
+
+    return (KHC_SYSTEM_PROMPT + date_line + ctx_section).strip()
+
+
+# ===========================================================================
 # DOCUMENT TYPE CONSTANTS
 # Used across the backend for consistent docType strings
 # ===========================================================================
