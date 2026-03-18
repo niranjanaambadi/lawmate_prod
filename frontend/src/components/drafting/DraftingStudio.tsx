@@ -75,6 +75,52 @@ async function uploadBlobToDrive(
   return res.json();
 }
 
+// ── Plain-text → HTML conversion ──────────────────────────────────────────────
+// The backend saves Claude's response as plain text with \n\n paragraph breaks
+// and optional markdown-lite markers.  TipTap expects HTML; without this
+// conversion all whitespace collapses and the draft appears as one blob.
+
+function escHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function inlineMarkdown(s: string): string {
+  return escHtml(s)
+    .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+    .replace(/\*\*(.+?)\*\*/g,     "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g,         "<em>$1</em>")
+    .replace(/__(.+?)__/g,         "<strong>$1</strong>")
+    .replace(/_(.+?)_/g,           "<em>$1</em>");
+}
+
+function plainTextToHtml(raw: string): string {
+  if (!raw) return "";
+  // If content already looks like HTML, pass it through untouched
+  if (/^[\s\n]*</.test(raw)) return raw;
+
+  const lines = raw.split("\n");
+  const parts: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^# (.+)/.test(line))       { parts.push(`<h1>${inlineMarkdown(line.slice(2).trim())}</h1>`); continue; }
+    if (/^## (.+)/.test(line))      { parts.push(`<h2>${inlineMarkdown(line.slice(3).trim())}</h2>`); continue; }
+    if (/^### (.+)/.test(line))     { parts.push(`<h3>${inlineMarkdown(line.slice(4).trim())}</h3>`); continue; }
+    if (/^#### (.+)/.test(line))    { parts.push(`<h3>${inlineMarkdown(line.slice(5).trim())}</h3>`); continue; }
+    if (/^[*-] (.+)/.test(line))    { parts.push(`<li>${inlineMarkdown(line.replace(/^[*-] /, ""))}</li>`); continue; }
+    if (line.trim() === "")         { parts.push("<p></p>"); continue; }
+    parts.push(`<p>${inlineMarkdown(line)}</p>`);
+  }
+
+  // Wrap consecutive <li> items in <ul>
+  return parts
+    .join("")
+    .replace(/(<li>.*?<\/li>)+/gs, (match) => `<ul>${match}</ul>`);
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function DraftingStudio({
@@ -98,7 +144,7 @@ export default function DraftingStudio({
       StarterKit,
       Placeholder.configure({ placeholder: "Generated draft will appear here…" }),
     ],
-    content: activeDraft?.content ?? "",
+    content: plainTextToHtml(activeDraft?.content ?? ""),
     editorProps: {
       attributes: { class: "prose prose-sm max-w-none focus:outline-none min-h-[160px] px-1" },
     },
@@ -107,9 +153,10 @@ export default function DraftingStudio({
   // Update editor when activeDraft changes
   useEffect(() => {
     if (!editor || !activeDraft) return;
-    if (editor.getHTML() !== activeDraft.content) {
-      editor.commands.setContent(activeDraft.content ?? "");
-      lastSavedRef.current = activeDraft.content ?? "";
+    const asHtml = plainTextToHtml(activeDraft.content ?? "");
+    if (editor.getHTML() !== asHtml) {
+      editor.commands.setContent(asHtml);
+      lastSavedRef.current = asHtml;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDraft?.id]);
@@ -252,18 +299,40 @@ export default function DraftingStudio({
     }
   };
 
-  // ── Export: PDF → local (print dialog) ────────────────────────────────────
+  // ── Export: PDF → local (print dialog via isolated window) ───────────────
+  // Opening a dedicated window avoids the "empty PDF" bug caused by nested
+  // visibility issues when printing from the main app window.
 
   const handlePrintPDF = () => {
     setExportMenuOpen(false);
-    // Inject print-only title so the browser tab title doesn't show as filename
-    const prevTitle   = document.title;
-    document.title    = activeDraft?.title ?? "Draft";
-    // Mark the editor zone for the print stylesheet
-    printZoneRef.current?.classList.add("drafting-print-zone");
-    window.print();
-    printZoneRef.current?.classList.remove("drafting-print-zone");
-    document.title = prevTitle;
+    if (!editor || !activeDraft) return;
+    const html  = editor.getHTML();
+    const title = activeDraft.title ?? "Draft";
+    const win   = window.open("", "_blank", "width=900,height=700");
+    if (!win) { alert("Pop-up blocked — please allow pop-ups for this site and try again."); return; }
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${title.replace(/</g, "&lt;")}</title>
+  <style>
+    @page { margin: 2cm; }
+    body { font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.6; color: #000; margin: 0; }
+    h1 { font-size: 16pt; font-weight: bold; margin: 0 0 12pt; }
+    h2 { font-size: 14pt; font-weight: bold; margin: 12pt 0 8pt; }
+    h3 { font-size: 13pt; font-weight: bold; margin: 10pt 0 6pt; }
+    p  { margin: 0 0 8pt; }
+    ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
+    strong { font-weight: bold; }
+    em     { font-style: italic; }
+  </style>
+</head>
+<body>${html}</body>
+</html>`);
+    win.document.close();
+    win.focus();
+    // Small delay lets the browser finish rendering before the print dialog opens
+    setTimeout(() => { win.print(); win.close(); }, 250);
   };
 
   if (!activeDraft) {

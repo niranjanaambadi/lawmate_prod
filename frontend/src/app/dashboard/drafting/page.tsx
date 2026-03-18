@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth }        from "@/contexts/AuthContext";
 import { useWorkspaceStore, type Workspace, type WorkspaceDraft, type CaseContext } from "@/stores/workspaceStore";
 import {
@@ -34,6 +34,33 @@ export default function DraftingPage() {
   const [briefModalOpen,  setBriefModalOpen]   = useState(false);
   const [briefPrefill,    setBriefPrefill]     = useState("");
   const [refreshingCtx,   setRefreshingCtx]    = useState(false);
+
+  // ── Resizable Chat / Studio split ─────────────────────────────────────────
+  // studioPct = percentage of the Chat+Studio row taken by Drafting Studio
+  const [studioPct,    setStudioPct]    = useState(42);
+  const splitRef                        = useRef<HTMLDivElement>(null);
+  const dragging                        = useRef(false);
+
+  const onSplitMouseDown = useCallback((e: React.MouseEvent) => {
+    dragging.current = true;
+    e.preventDefault();
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging.current || !splitRef.current) return;
+      const rect  = splitRef.current.getBoundingClientRect();
+      const pct   = ((rect.right - e.clientX) / rect.width) * 100;
+      setStudioPct(Math.min(70, Math.max(20, pct)));
+    };
+    const onMouseUp = () => { dragging.current = false; };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup",   onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup",   onMouseUp);
+    };
+  }, []);
 
   const currentWs    = activeWorkspace();
   const currentDraft = currentWs?.drafts.find((d) => d.id === activeDraftId) ?? null;
@@ -196,10 +223,10 @@ export default function DraftingPage() {
               isRefreshing={refreshingCtx}
             />
 
-            {/* Chat + Studio side by side on large screens */}
-            <div className="flex flex-1 overflow-hidden">
-              {/* Chat */}
-              <div className="flex-1 flex flex-col overflow-hidden border-r border-slate-200">
+            {/* Chat + Studio side by side — resizable via drag handle */}
+            <div ref={splitRef} className="flex flex-1 overflow-hidden">
+              {/* Chat — takes the remaining width */}
+              <div className="flex flex-col overflow-hidden border-r border-slate-200" style={{ flex: `0 0 ${100 - studioPct}%`, minWidth: "20%" }}>
                 <div className="px-3 pt-2 pb-0.5">
                   <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
                     Chat
@@ -212,8 +239,15 @@ export default function DraftingPage() {
                 />
               </div>
 
-              {/* Drafting Studio */}
-              <div className="w-[480px] shrink-0 flex flex-col overflow-hidden">
+              {/* Drag handle */}
+              <div
+                onMouseDown={onSplitMouseDown}
+                className="w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-indigo-400 active:bg-indigo-500 transition-colors"
+                title="Drag to resize"
+              />
+
+              {/* Drafting Studio — width controlled by studioPct */}
+              <div className="flex flex-col overflow-hidden" style={{ flex: `0 0 ${studioPct}%`, minWidth: "20%" }}>
                 <div className="px-3 pt-2 pb-0.5 flex items-center justify-between">
                   <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
                     Drafting Studio

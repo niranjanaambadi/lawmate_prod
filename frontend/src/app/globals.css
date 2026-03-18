@@ -58,13 +58,21 @@
 }
 
 /* ── Print styles: only the draft editor content prints ─────────────────── */
+/* Use visibility (not display:none) so nested children can override it.     */
+/* display:none on a parent permanently hides all descendants; visibility    */
+/* can be overridden by children with visibility:visible.                    */
 @media print {
-  body > *                      { display: none !important; }
-  .drafting-print-zone          { display: block !important; }
-  .drafting-print-zone          { position: fixed; inset: 0; background: white; padding: 2cm; font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.6; color: #000; }
-  .drafting-print-zone h1       { font-size: 16pt; font-weight: bold; margin: 0 0 12pt; }
-  .drafting-print-zone h2       { font-size: 14pt; font-weight: bold; margin: 12pt 0 8pt; }
-  .drafting-print-zone p        { margin: 0 0 8pt; }
+  body > *                              { visibility: hidden !important; }
+  .drafting-print-zone,
+  .drafting-print-zone *                { visibility: visible !important; }
+  .drafting-print-zone                  { position: fixed; inset: 0; background: white; padding: 2cm; font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.6; color: #000; overflow: visible; }
+  .drafting-print-zone h1               { font-size: 16pt; font-weight: bold; margin: 0 0 12pt; }
+  .drafting-print-zone h2               { font-size: 14pt; font-weight: bold; margin: 12pt 0 8pt; }
+  .drafting-print-zone h3               { font-size: 13pt; font-weight: bold; margin: 10pt 0 6pt; }
+  .drafting-print-zone p                { margin: 0 0 8pt; }
   .drafting-print-zone ul,
-  .drafting-print-zone ol       { margin: 0 0 8pt; padding-left: 20pt; }
+  .drafting-print-zone ol               { margin: 0 0 8pt; padding-left: 20pt; }
+  /* Hide the Tiptap toolbar inside the print zone */
+  .drafting-print-zone .ProseMirror-menubar,
+  .drafting-print-zone [data-toolbar]   { display: none !important; }
 }
