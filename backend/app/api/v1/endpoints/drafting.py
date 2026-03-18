@@ -218,6 +218,27 @@ async def upload_document(
     return doc
 
 
+@router.get("/workspaces/{workspace_id}/documents/{doc_id}/url")
+def get_document_url(
+    workspace_id: str,
+    doc_id:       str,
+    current_user: User    = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
+    """Return a short-lived presigned S3 URL to view/download a document."""
+    svc = _svc()
+    try:
+        url = svc.get_document_presigned_url(
+            db,
+            workspace_id=workspace_id,
+            doc_id=doc_id,
+            user_id=str(current_user.id),
+        )
+    except LookupError as exc:
+        raise _not_found(exc)
+    return {"url": url}
+
+
 @router.delete("/workspaces/{workspace_id}/documents/{doc_id}", status_code=204)
 async def delete_document(
     workspace_id: str,

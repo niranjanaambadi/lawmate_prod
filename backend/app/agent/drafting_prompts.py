@@ -187,63 +187,47 @@ When generating a full draft document (called via the Generate Draft flow):
 
 EXTRACTION_PROMPT = """You are extracting structured case context from a set of legal documents uploaded to a Kerala High Court lawyer's workspace.
 
-Analyse ALL documents provided and extract the following structured information. Return ONLY a valid JSON object matching the schema below — no preamble, no markdown, no explanation.
+Analyse ALL documents provided and extract the following structured information. Return ONLY a valid JSON object matching the schema below — no preamble, no markdown fences, no explanation. Output raw JSON only.
 
-If a field cannot be determined from the documents, use null. Do not guess.
+If a field cannot be determined from the documents, use null for scalar fields and [] for array fields. Do not guess.
 
-```json
-{
-  "parties": {
-    "petitioner": "<full name(s) of petitioner/accused/appellant>",
-    "respondent": "<full name(s) of respondent/complainant/state>",
-    "counsel_petitioner": "<advocate name if mentioned>",
-    "counsel_respondent": "<advocate name if mentioned>"
-  },
-  "court": "<name of court where matter is pending or originated>",
-  "case_number": "<case number if available, else null>",
-  "matter_type": "<brief description e.g. 'bail application', 'writ petition challenging service order', 'criminal appeal'>",
-  "sections_invoked": ["<list of all sections of law mentioned e.g. 'Section 302 IPC', 'Section 439 CrPC'>"],
-  "offence_type": "<bailable | non-bailable | unknown | not_applicable>",
-  "date_of_arrest": "<ISO date string YYYY-MM-DD or null>",
-  "custody_period_days": "<integer number of days in custody as of latest document date, or null>",
-  "prior_bail_applications": [
-    {
-      "court": "<court where bail was applied>",
+{{
+  "parties": {{
+    "petitioner": "<full name(s) of petitioner/accused/appellant — null if unknown>",
+    "respondent": "<full name(s) of respondent/complainant/State — null if unknown>"
+  }},
+  "caseType": "<brief description e.g. 'Bail Application', 'Writ Petition (Criminal)', 'Criminal Appeal' — null if unknown>",
+  "caseNumber": "<case number if visible in any document e.g. 'Crl.M.C. No.1234/2024' — null if not found>",
+  "courtNumber": "<court/bench number if mentioned — null if unknown>",
+  "judge": "<name of judge(s) if mentioned — null if unknown>",
+  "nextHearing": "<next hearing date in DD/MM/YYYY format if mentioned — null if not found>",
+  "status": "<one plain-English sentence: where this matter currently stands procedurally>",
+  "sectionsInvoked": ["<every section of law mentioned across ALL documents e.g. 'Section 302 IPC', 'Section 439 CrPC', 'Article 226 Constitution'>"],
+  "reliefSought": "<primary relief sought as stated in any petition/application — null if not determinable>",
+  "proceduralHistory": [
+    {{
       "date": "<YYYY-MM-DD or null>",
-      "result": "<rejected | granted | pending | withdrawn>",
-      "order_available": "<true | false>"
-    }
+      "event": "<description of the procedural event e.g. 'FIR registered', 'Bail rejected by Sessions Court'>"
+    }}
   ],
-  "key_dates": [
-    {
-      "event": "<description of event>",
-      "date": "<YYYY-MM-DD or null>"
-    }
+  "recommendedActions": [
+    "<ordered recommended next steps for the advocate, most urgent first>"
   ],
-  "documents_seen": ["<list of document types identified e.g. 'FIR', 'ChargeSheet', 'RemandOrder', 'SessionsCourtBailRejection'>"],
-  "missing_documents": [
-    {
-      "document": "<document name>",
-      "reason_needed": "<why this document is required for the likely next step>"
-    }
-  ],
-  "procedural_status": "<plain English statement of where this matter currently stands>",
-  "recommended_actions": [
-    "<ordered list of recommended next steps for the advocate>"
-  ],
-  "recommended_petition_type": "<most likely petition type to be filed e.g. 'Bail Application under Section 439 CrPC', 'Writ Petition (Criminal) under Article 226', 'Criminal Appeal under Section 374(2) CrPC'>",
-  "jurisdiction_note": "<any jurisdictional issue to flag e.g. 'Sessions Court must be approached first before KHC', 'Division Bench required for Habeas Corpus'>",
-  "urgency_flag": "<high | medium | low>",
-  "urgency_reason": "<reason for urgency flag if high or medium>"
-}
-```
+  "missingDocuments": [
+    "<name of a document procedurally required for the next filing step at KHC but not present in the uploaded set>"
+  ]
+}}
 
 Important rules:
-- Extract sections_invoked exhaustively — list every section of every Act mentioned across all documents
-- For missing_documents, focus on what is procedurally required to file the next step at KHC — not general wish list
-- recommended_actions must be ordered by urgency and procedural sequence
+- sectionsInvoked: exhaustively list EVERY section of EVERY Act mentioned across all documents
+- missingDocuments: list ONLY what is procedurally necessary for the next KHC filing — not a general wish list; each entry must be a plain string (document name)
+- recommendedActions: ordered by urgency and procedural sequence; each entry must be a plain string
+- proceduralHistory: ordered chronologically, oldest first
 - Do not invent facts not present in the documents
-- If documents span multiple matters, focus on the most recent / most urgent matter"""
+- If documents span multiple matters, focus on the most recent / most urgent matter
+
+Documents:
+{documents}"""
 
 
 # ===========================================================================

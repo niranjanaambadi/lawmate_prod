@@ -120,15 +120,18 @@ export default function DraftingPage() {
   };
 
   // ── Context refresh ────────────────────────────────────────────────────────
-  const handleRefreshContext = async () => {
-    if (!currentWs || !token) return;
+  const handleRefreshContext = async (): Promise<"ok" | "empty" | "error"> => {
+    if (!currentWs || !token) return "error";
     setRefreshingCtx(true);
     try {
       const { extractWorkspaceContext } = await import("@/lib/api");
       const ctx = await extractWorkspaceContext(currentWs.id, token);
-      setCaseContext(currentWs.id, (ctx ?? {}) as CaseContext);
+      const ctxObj = (ctx ?? {}) as CaseContext;
+      setCaseContext(currentWs.id, ctxObj);
+      return Object.keys(ctxObj).length > 0 ? "ok" : "empty";
     } catch (err: unknown) {
       console.error("Context refresh failed:", err);
+      return "error";
     } finally {
       setRefreshingCtx(false);
     }

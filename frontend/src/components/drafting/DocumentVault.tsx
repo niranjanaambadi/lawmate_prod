@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { FileText, Trash2, Eye, AlertCircle } from "lucide-react";
+import { FileText, Trash2, Eye } from "lucide-react";
 import type { WorkspaceDocument } from "@/stores/workspaceStore";
 import UploadZone from "./UploadZone";
 
@@ -38,7 +38,21 @@ interface Props {
 export default function DocumentVault({
   workspaceId, documents, citedDocIds, token, onUploaded, onDeleted,
 }: Props) {
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleting,  setDeleting]  = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+
+  const handlePreview = async (docId: string) => {
+    setPreviewing(docId);
+    try {
+      const { getDocumentUrl } = await import("@/lib/api");
+      const url = await getDocumentUrl(workspaceId, docId, token);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not open document");
+    } finally {
+      setPreviewing(null);
+    }
+  };
 
   const totalTokens = documents.reduce((s, d) => s + (d.tokenEstimate ?? 0), 0);
   const tokenLabel  = totalTokens > 1000
@@ -109,13 +123,24 @@ export default function DocumentVault({
                   )}
                 </div>
               </div>
-              <button
-                onClick={() => handleDelete(doc.id)}
-                disabled={deleting === doc.id}
-                className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity shrink-0"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0">
+                <button
+                  onClick={() => handlePreview(doc.id)}
+                  disabled={previewing === doc.id}
+                  title="View document"
+                  className="text-slate-300 hover:text-indigo-500 disabled:opacity-50 transition-colors"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => handleDelete(doc.id)}
+                  disabled={deleting === doc.id}
+                  title="Remove document"
+                  className="text-slate-300 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           );
         })}

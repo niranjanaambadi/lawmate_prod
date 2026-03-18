@@ -96,6 +96,75 @@ def _needs_thinking(text: str) -> bool:
 
 
 # ============================================================================
+# Case context normalisation
+# Translates legacy snake_case extraction output to camelCase so that the
+# frontend CaseContext type is always satisfied.
+# ============================================================================
+
+def _normalize_case_context(raw: dict) -> dict:
+    """
+    Map old snake_case extraction keys → camelCase keys expected by the
+    frontend CaseContext interface.  New extractions already use camelCase
+    (post EXTRACTION_PROMPT update) so the remaps below are no-ops for them.
+    """
+    if not raw:
+        return {}
+
+    out: dict = {}
+
+    # parties — same structure in old and new schema
+    parties = raw.get("parties") or {}
+    if parties:
+        out["parties"] = {
+            "petitioner": parties.get("petitioner"),
+            "respondent":  parties.get("respondent"),
+        }
+
+    # scalar renames
+    out["caseType"]    = raw.get("caseType")    or raw.get("matter_type")
+    out["caseNumber"]  = raw.get("caseNumber")  or raw.get("case_number")
+    out["courtNumber"] = raw.get("courtNumber") or raw.get("court_number")
+    out["judge"]       = raw.get("judge")
+    out["nextHearing"] = raw.get("nextHearing") or raw.get("next_hearing")
+    out["status"]      = raw.get("status")      or raw.get("procedural_status")
+    out["reliefSought"] = raw.get("reliefSought") or raw.get("relief_sought")
+
+    # sectionsInvoked — was sections_invoked (list of strings) in old schema
+    si = raw.get("sectionsInvoked") or raw.get("sections_invoked") or []
+    out["sectionsInvoked"] = [s for s in si if isinstance(s, str)]
+
+    # proceduralHistory — was key_dates [{event, date}] in old schema
+    ph = raw.get("proceduralHistory") or raw.get("key_dates") or []
+    out["proceduralHistory"] = [
+        {"date": e.get("date"), "event": e.get("event")}
+        for e in ph
+        if isinstance(e, dict)
+    ]
+
+    # recommendedActions — was recommended_actions (list of strings) in old schema
+    ra = raw.get("recommendedActions") or raw.get("recommended_actions") or []
+    out["recommendedActions"] = [a for a in ra if isinstance(a, str)]
+
+    # missingDocuments — was missing_documents (list of {document, reason_needed})
+    # New schema: list of strings.  Old schema: list of dicts.
+    md_raw = raw.get("missingDocuments") or raw.get("missing_documents") or []
+    md: list[str] = []
+    for item in md_raw:
+        if isinstance(item, str):
+            md.append(item)
+        elif isinstance(item, dict):
+            # Old format: {"document": "...", "reason_needed": "..."}
+            doc_name = item.get("document") or item.get("name") or ""
+            reason   = item.get("reason_needed") or item.get("reason") or ""
+            if doc_name:
+                md.append(f"{doc_name} — {reason}" if reason else doc_name)
+    out["missingDocuments"] = md
+
+    # Drop None values from scalars so the frontend {} check stays clean
+    return {k: v for k, v in out.items() if v is not None and v != [] and v != {}}
+
+
+# ============================================================================
 # Workspace CRUD
 # ============================================================================
 
@@ -310,6 +379,40 @@ async def delete_document(
 
 
 # ============================================================================
+# Document presigned URL
+# ============================================================================
+
+def get_document_presigned_url(
+    db: Session,
+    workspace_id: str,
+    doc_id: str,
+    user_id: str,
+    expires: int = 3600,
+) -> str:
+    """Return a presigned S3 GET URL for the given document (valid for `expires` seconds)."""
+    get_workspace(db, workspace_id, user_id)  # ownership check
+
+    doc = db.query(WorkspaceDocument).filter(
+        WorkspaceDocument.id == doc_id,
+        WorkspaceDocument.workspace_id == workspace_id,
+    ).first()
+    if not doc:
+        raise LookupError(f"Document {doc_id} not found in workspace {workspace_id}.")
+
+    s3 = _s3_client()
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket":              settings.S3_BUCKET_NAME,
+            "Key":                 doc.s3_key,
+            "ResponseContentDisposition": f'inline; filename="{doc.filename}"',
+        },
+        ExpiresIn=expires,
+    )
+    return url
+
+
+# ============================================================================
 # Case context extraction
 # ============================================================================
 
@@ -365,6 +468,9 @@ async def extract_case_context(
     except Exception as exc:
         logger.warning("extract_case_context failed: %s", exc)
         context_data = {}
+
+    # Normalise to camelCase so the frontend CaseContext type is satisfied
+    context_data = _normalize_case_context(context_data)
 
     ws.case_context = context_data
     ws.updated_at   = datetime.utcnow()
@@ -902,11 +1008,14 @@ async def _run_context_extraction(
 # ── Serialisation helpers ─────────────────────────────────────────────────────
 
 def _ws_to_dict(ws: Workspace) -> dict:
+    # Normalise stored caseContext on read so legacy workspaces (with
+    # snake_case keys from the old EXTRACTION_PROMPT) display correctly.
+    case_ctx = _normalize_case_context(ws.case_context) if ws.case_context else None
     return {
         "id":                  str(ws.id),
         "userId":              ws.user_id,
         "label":               ws.label,
-        "caseContext":         ws.case_context,
+        "caseContext":         case_ctx,
         "conversationHistory": ws.conversation_history or [],
         "createdAt":           ws.created_at.isoformat() if ws.created_at else None,
         "updatedAt":           ws.updated_at.isoformat() if ws.updated_at else None,

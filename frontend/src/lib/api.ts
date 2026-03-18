@@ -2102,6 +2102,24 @@ export async function uploadWorkspaceDocument(
   return res.json();
 }
 
+export async function getDocumentUrl(
+  workspaceId: string,
+  docId: string,
+  token: string,
+): Promise<string> {
+  const baseUrl = getBaseUrl();
+  const res = await fetch(
+    `${baseUrl}/api/v1/drafting/workspaces/${workspaceId}/documents/${docId}/url`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return (data as { url: string }).url;
+}
+
 export async function deleteWorkspaceDocument(
   workspaceId: string,
   docId: string,
