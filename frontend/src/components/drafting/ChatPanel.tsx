@@ -221,10 +221,15 @@ export default function ChatPanel({ workspaceId, token, onDraftFromMessage, disa
       {/* Message list */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {messages.length === 0 && (
-          <div className="text-center text-slate-400 text-sm mt-8">
-            <p>Ask anything about your uploaded documents</p>
-            <p className="text-xs mt-1 text-slate-300">
-              or request a draft: "Draft a bail application based on these documents"
+          <div className="text-center mt-8 space-y-2">
+            <p className="text-sm font-medium text-slate-600">
+              Ask anything about your uploaded documents
+            </p>
+            <p className="text-xs text-slate-400">
+              or request a draft — e.g.{" "}
+              <span className="italic text-indigo-500">
+                "Draft a bail application based on these documents"
+              </span>
             </p>
           </div>
         )}
