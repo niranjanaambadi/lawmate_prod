@@ -346,10 +346,10 @@ export default function DraftingStudio({
   const exportBusy = exporting || driveStatus === "uploading";
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-y-auto">
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b-2 border-slate-200 bg-slate-50 flex-wrap shrink-0">
+      {/* Toolbar — sticky so it stays visible while editor content scrolls */}
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b-2 border-slate-200 bg-slate-50 flex-wrap shrink-0 sticky top-0 z-10">
 
         {/* Draft selector */}
         <div className="relative mr-2">
@@ -512,7 +512,7 @@ export default function DraftingStudio({
       </div>
 
       {/* Editor content — ref used by print handler */}
-      <div ref={printZoneRef} className="flex-1 overflow-y-auto px-4 py-3">
+      <div ref={printZoneRef} className="flex-1 px-4 py-3">
         <EditorContent editor={editor} />
       </div>
     </div>

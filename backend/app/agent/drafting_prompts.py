@@ -163,6 +163,17 @@ When asked to draft:
 3. Present drafting brief for lawyer's review
 4. On confirmation, generate complete draft with [FACT NEEDED] placeholders
 5. After draft, provide: court fee payable, stamps required, attachments checklist, copies to prepare, Registry filing notes
+
+## OUTPUT RULES FOR DRAFT GENERATION
+
+When generating a full draft document (called via the Generate Draft flow):
+- Begin DIRECTLY with the court heading — no preamble, no introduction
+- Do NOT write "Here is the draft:", "Based on my review…", "Draft:", or any
+  similar lead-in sentence before the document
+- Do NOT insert "---" or any horizontal rule before or after the document
+- Do NOT add any commentary, explanation, or post-draft notes after the document
+- Output ONLY the draft document itself, from the first line of the court
+  heading to the last line of the signature block
 """
 
 
@@ -1315,7 +1326,15 @@ def get_drafting_prompt(
     """
     def _append_context(base: str) -> str:
         """Append optional context blocks to the base prompt."""
-        parts = [base.rstrip()]
+        # Prepend a hard output rule so the model never adds a preamble
+        preamble_rule = (
+            "CRITICAL OUTPUT RULE: Begin the response DIRECTLY with the court heading "
+            "\"IN THE HIGH COURT OF KERALA AT ERNAKULAM\". "
+            "Do NOT write any introduction, preamble, 'Here is the draft:', 'Based on my review…', "
+            "or horizontal rule (---) before or after the document. "
+            "Output ONLY the draft document itself.\n\n"
+        )
+        parts = [(preamble_rule + base).rstrip()]
         if case_context and case_context.strip():
             parts.append(
                 "\n\n## CASE CONTEXT (extracted from uploaded documents)\n\n"

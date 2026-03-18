@@ -35,6 +35,9 @@ export default function DraftingPage() {
   const [briefPrefill,    setBriefPrefill]     = useState("");
   const [refreshingCtx,   setRefreshingCtx]    = useState(false);
 
+  // Debounce timer — prevents multiple rapid uploads firing multiple extractions
+  const ctxDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
   // ── Resizable Chat / Studio split ─────────────────────────────────────────
   // studioPct = percentage of the Chat+Studio row taken by Drafting Studio
   const [studioPct,    setStudioPct]    = useState(42);
@@ -135,6 +138,14 @@ export default function DraftingPage() {
   const handleUploaded = useCallback((doc: unknown) => {
     if (!currentWs) return;
     addDocument(currentWs.id, doc as Workspace["documents"][0]);
+
+    // Auto-extract case context after upload.
+    // Debounced by 1.5s so rapid multi-file uploads trigger only one extraction.
+    if (ctxDebounceRef.current) clearTimeout(ctxDebounceRef.current);
+    ctxDebounceRef.current = setTimeout(() => {
+      handleRefreshContext();
+    }, 1500);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWs?.id]);
 
   const handleDeleted = useCallback((docId: string) => {
