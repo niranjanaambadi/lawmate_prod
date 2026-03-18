@@ -520,14 +520,14 @@ async def stream_chat(
     # ── Build messages ────────────────────────────────────────────────────────
     convo_messages: list[dict] = []
     if docs_text:
-        # First turn: inject document context with prompt caching
+        # First turn: inject document context.
+        # Note: cacheControl is NOT supported in Bedrock Converse API message
+        # content blocks — it's a direct Anthropic API-only feature and causes
+        # a ValidationException on Bedrock. Omit it entirely.
         convo_messages.append({
             "role": "user",
             "content": [
-                {
-                    "text": docs_text,
-                    "cacheControl": {"type": "ephemeral"},
-                },
+                {"text": docs_text},
                 {"text": "(Documents loaded. Ready for your question.)"},
             ],
         })

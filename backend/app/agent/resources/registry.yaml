@@ -200,3 +200,116 @@ resources:
       arising in KHC writ petitions.
     tags: [civil, bare_acts, land, writ]
     version: "current"
+
+  # ── Kerala State Legislation (India Code — Kerala section) ──────────────
+
+  - id: kerala_legislation_index
+    name: Kerala State Legislation Index (India Code)
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/2516
+    description: >
+      India Code repository of all Kerala state legislations enacted by the
+      state legislature. Comprehensive, up-to-date, and officially maintained.
+      Use as the primary reference for any Kerala state act or amendment.
+    tags: [bare_acts, kerala_state, writ, civil, criminal]
+    version: "current"
+
+  - id: kerala_law_department
+    name: Kerala Law Department — Kerala Code & Annual Acts
+    type: url
+    url: https://lawsect.kerala.gov.in
+    description: >
+      Kerala Law Department portal — publishes Kerala Code, annual Acts &
+      Ordinances, List of Enactments, Legal Glossary, and Law Reforms
+      Commission Reports. "Kerala Laws 1950–Present" is the authoritative
+      state-level legislative source.
+    tags: [bare_acts, kerala_state, writ, civil, criminal]
+    version: "current"
+
+  - id: kerala_police_act_2011
+    name: Kerala Police Act 2011
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/6374
+    description: >
+      Kerala Police Act 2011 — powers of police, preventive detention
+      (KAAPA/KPDA provisions), bail restrictions, surveillance. Frequently
+      raised in writ petitions challenging police action at KHC.
+    tags: [criminal, writ, bare_acts, kerala_state]
+    version: "2011"
+
+  - id: kerala_abkari_act
+    name: Kerala Abkari Act (Prohibition of Liquor)
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/6339
+    description: >
+      Kerala Abkari Act — regulation and prohibition of liquor, offences,
+      bail provisions, penalties. One of the most frequently litigated
+      criminal statutes at the Kerala High Court.
+    tags: [criminal, bail, bare_acts, kerala_state, abkari]
+    version: "current"
+
+  - id: kerala_buildings_rent_control
+    name: Kerala Buildings (Lease and Rent Control) Act 1965
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/6341
+    description: >
+      Kerala Buildings (Lease and Rent Control) Act 1965 — tenant rights,
+      eviction grounds, fixation of fair rent, subletting restrictions.
+      Core statute for building rent disputes in Kerala.
+    tags: [civil, bare_acts, kerala_state, rent, eviction]
+    version: "current"
+
+  - id: kerala_shops_establishments_act
+    name: Kerala Shops and Commercial Establishments Act 1960
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/6381
+    description: >
+      Kerala Shops and Commercial Establishments Act 1960 — employment
+      conditions, working hours, termination, service matters for shop
+      and commercial establishment workers. Arises in service writ petitions.
+    tags: [civil, bare_acts, kerala_state, employment, service]
+    version: "current"
+
+  - id: pocso_act
+    name: Protection of Children from Sexual Offences (POCSO) Act 2012
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/2079
+    description: >
+      POCSO Act 2012 — offences against children, special courts, bail
+      restrictions (Section 31), trial procedure, mandatory reporting.
+      High incidence at Kerala HC — bail and quashing applications.
+    tags: [criminal, bail, bare_acts, pocso, evidence]
+    version: "2012"
+
+  - id: sc_st_atrocities_act
+    name: SC/ST (Prevention of Atrocities) Act 1989
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/1368
+    description: >
+      Scheduled Castes & Scheduled Tribes (Prevention of Atrocities) Act
+      1989 as amended in 2015 — offences, anticipatory bail restrictions
+      (post-2018 Supreme Court judgment), special courts, trial procedure.
+    tags: [criminal, bail, bare_acts, atrocities]
+    version: "1989-amended-2015"
+
+  - id: ndps_act
+    name: Narcotic Drugs and Psychotropic Substances (NDPS) Act 1985
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/1361
+    description: >
+      NDPS Act 1985 — offences, quantities (small/commercial), bail
+      restrictions (Section 37), mandatory minimum sentences. Extensively
+      litigated at Kerala HC — bail, sentencing, and procedural challenges.
+    tags: [criminal, bail, bare_acts, ndps, narcotics]
+    version: "current"
+
+  - id: motor_vehicles_act
+    name: Motor Vehicles Act 1988 (as amended 2019)
+    type: url
+    url: https://indiacode.nic.in/handle/123456789/1798
+    description: >
+      Motor Vehicles Act 1988 amended by MV (Amendment) Act 2019 —
+      compensation (MACT), enhanced penalties, hit-and-run provisions,
+      third party insurance. Motor accident claims frequent at Kerala HC.
+    tags: [civil, bare_acts, motor_accident, compensation]
+    version: "1988-amended-2019"

@@ -438,6 +438,12 @@ def _summarise_tool_result(tool_name: str, result: dict) -> str:
         "get_calendar_events":      lambda d: f"{d.get('count', 0)} events",
         "delete_calendar_event":    lambda d: d.get("message", "Event deleted"),
         "draft_document":           lambda d: f"Draft ready ({d.get('word_count', 0)} words)",
+        "statute_crosswalk":        lambda d: (
+            f"{d.get('from_act', '')} § {d.get('section', '')} → "
+            f"{d.get('to_act', '')} § {d.get('bns_section') or d.get('bnss_section') or d.get('bsa_section') or d.get('ipc_section') or d.get('crpc_section') or d.get('iea_section') or '?'}"
+            if not isinstance(d.get("mappings"), list)
+            else f"{d.get('from_act', '')} § {d.get('section', '')} → {len(d['mappings'])} {d.get('to_act', '')} section(s)"
+        ),
     }
 
     summariser = summaries.get(tool_name)

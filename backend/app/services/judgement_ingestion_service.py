@@ -10,10 +10,12 @@ Flow:
   1. Receive judgment list from IndianKanoon
   2. Fetch full document text for each judgment (IndianKanoon /doc/ endpoint)
   3. Chunk into overlapping segments
-  4. Embed + store in Bedrock KB via S3 → KB sync
+  4. Write document + companion .metadata.json to S3
+  5. Trigger Bedrock KB ingestion job to embed new docs
 
 Bedrock KB ingestion model:
-  - Documents stored as JSON in S3 (lawmate-judgments-kb bucket)
+  - Documents stored as plain text in S3 (lawmate-judgments-kb bucket)
+  - Companion <key>.metadata.json stores metadataAttributes for KB filtering
   - Bedrock KB data source points to that S3 prefix
   - After S3 write, trigger KB ingestion job to embed new docs
 
@@ -27,10 +29,10 @@ Environment variables:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -45,6 +47,20 @@ AWS_REGION             = os.getenv("AWS_REGION", "ap-south-1")
 
 CHUNK_SIZE    = 800   # tokens per chunk (approximate — using word count)
 CHUNK_OVERLAP = 150   # overlap between chunks for context continuity
+
+# Legal keywords used to auto-tag retrieval_tags metadata
+_LEGAL_KEYWORDS = [
+    "bail", "anticipatory bail", "ndps", "murder", "assault", "rape", "cheating",
+    "fraud", "writ", "habeas corpus", "mandamus", "certiorari", "land acquisition",
+    "property", "contract", "specific performance", "injunction", "contempt",
+    "criminal", "civil", "appeal", "revision", "quashing", "custody", "remand",
+    "evidence", "witness", "sentence", "conviction", "acquittal", "discharge",
+    "chargesheet", "fir", "police", "arrest", "motor accident", "compensation",
+    "service", "employment", "termination", "pension", "family", "divorce",
+    "maintenance", "adoption", "arbitration", "income tax", "gst", "customs",
+    "environment", "forest", "mining", "building", "rent", "eviction",
+    "pocso", "atrocities", "corruption", "abkari", "excise", "narcotics",
+]
 
 
 # ============================================================================
@@ -98,15 +114,16 @@ async def ingest_judgments(
             # Chunk the document
             chunks = _chunk_text(full_text)
 
-            # Build KB document with metadata
-            kb_doc = _build_kb_document(
-                judgment=judgment,
-                chunks=chunks,
-                query=query,
-            )
+            # Write document to S3 (full text, chunked and joined)
+            document_text = _build_document_text(judgment, chunks)
+            await _write_to_s3(s3_key, document_text.encode("utf-8"), "text/plain")
 
-            # Write to S3
-            await _write_to_s3(s3_key, kb_doc)
+            # Write companion metadata file to S3
+            metadata    = _build_metadata(judgment, query)
+            meta_s3_key = _metadata_s3_key(s3_key)
+            meta_bytes  = json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8")
+            await _write_to_s3(meta_s3_key, meta_bytes, "application/json")
+
             stats["ingested"] += 1
 
         except Exception as e:
@@ -138,7 +155,6 @@ async def _fetch_judgment_text(doc_id: str) -> Optional[str]:
 
     try:
         import httpx
-        import re
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
@@ -170,10 +186,10 @@ def _chunk_text(text: str) -> list[str]:
     Uses word-based splitting (approx 1.3 words per token for legal text).
     Overlap ensures citations and context at chunk boundaries aren't lost.
     """
-    words      = text.split()
-    total      = len(words)
-    chunks     = []
-    start      = 0
+    words  = text.split()
+    total  = len(words)
+    chunks = []
+    start  = 0
 
     while start < total:
         end   = min(start + CHUNK_SIZE, total)
@@ -190,37 +206,108 @@ def _chunk_text(text: str) -> list[str]:
 
 
 # ============================================================================
-# KB document builder
+# Document and metadata builders
 # ============================================================================
 
-def _build_kb_document(
-    judgment: dict,
-    chunks:   list[str],
-    query:    str,
-) -> dict:
+def _build_document_text(judgment: dict, chunks: list[str]) -> str:
     """
-    Builds the KB document structure written to S3.
+    Builds the plain-text document stored in S3.
 
-    Bedrock KB expects documents with a text field and metadata.
-    We store each judgment as a single document with metadata —
-    Bedrock handles chunking on its own for embedding, but we pre-chunk
-    to keep individual document sizes manageable.
+    Bedrock KB embeds this text. We prefix with a header so the citation
+    and case name are always in the first chunk (highest retrieval weight).
     """
+    header_lines = [
+        f"Case: {judgment.get('title', '')}",
+        f"Citation: {judgment.get('citation', '')}",
+        f"Court: {judgment.get('court', 'Kerala High Court')}",
+        f"Date: {judgment.get('date', '')}",
+        f"Source: {judgment.get('source_url', '')}",
+        "─" * 60,
+        "",
+    ]
+    header = "\n".join(header_lines)
+    body   = "\n\n".join(chunks)
+    return f"{header}{body}"
+
+
+def _build_metadata(judgment: dict, query: str) -> dict:
+    """
+    Builds the Bedrock KB companion metadata file.
+
+    Bedrock requires a separate <key>.metadata.json file alongside each
+    document. The metadataAttributes are indexed and can be used for
+    filtered retrieval queries.
+
+    Format:
+        {
+            "metadataAttributes": {
+                "source_type": "judgment",
+                ...
+            }
+        }
+    """
+    title    = judgment.get("title", "")
+    date_str = judgment.get("date", "")
+    citation = judgment.get("citation", "")
+    court    = judgment.get("court", "Kerala High Court")
+
     return {
-        "metadata": {
-            "title":       judgment.get("title", ""),
-            "citation":    judgment.get("citation", ""),
-            "date":        judgment.get("date", ""),
-            "court":       judgment.get("court", "Kerala High Court"),
-            "source_url":  judgment.get("source_url", ""),
-            "doc_id":      str(judgment.get("doc_id", "")),
-            "query_hint":  query,          # helps with relevance for similar future queries
-            "ingested_at": datetime.utcnow().isoformat(),
-        },
-        "chunks": chunks,
-        # Bedrock KB uses the first chunk as the primary text for retrieval
-        "text": chunks[0] if chunks else "",
+        "metadataAttributes": {
+            "source_type":     "judgment",
+            "jurisdiction":    _infer_jurisdiction(court),
+            "year":            _extract_year(date_str),
+            "court":           court,
+            "citation":        citation,
+            "doc_id":          str(judgment.get("doc_id", "")),
+            "decision_date":   _normalise_date(date_str),
+            "retrieval_tags":  _extract_retrieval_tags(title, query),
+            "query_hint":      query,
+            "source_url":      judgment.get("source_url", ""),
+            "ingested_at":     datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
     }
+
+
+# ============================================================================
+# Metadata helpers
+# ============================================================================
+
+def _extract_year(date_str: str) -> str:
+    """Extracts 4-digit year from a date string."""
+    match = re.search(r"\b(19|20)\d{2}\b", date_str or "")
+    return match.group(0) if match else ""
+
+
+def _normalise_date(date_str: str) -> str:
+    """
+    Attempts to normalise date string to YYYY-MM-DD.
+    Falls back to original string if parsing fails.
+    """
+    if not date_str:
+        return ""
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %B %Y", "%B %d, %Y"):
+        try:
+            return datetime.strptime(date_str.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return date_str
+
+
+def _infer_jurisdiction(court: str) -> str:
+    """Maps court name to a jurisdiction string."""
+    court_lower = (court or "").lower()
+    if "kerala" in court_lower:
+        return "kerala_high_court"
+    if "supreme" in court_lower:
+        return "supreme_court"
+    return "high_court"
+
+
+def _extract_retrieval_tags(title: str, query: str) -> list[str]:
+    """Extracts legal keyword tags from title and query for KB metadata."""
+    combined = f"{title} {query}".lower()
+    tags = [kw for kw in _LEGAL_KEYWORDS if kw in combined]
+    return tags[:10]  # cap at 10 to keep metadata compact
 
 
 # ============================================================================
@@ -228,8 +315,13 @@ def _build_kb_document(
 # ============================================================================
 
 def _judgment_s3_key(doc_id: str) -> str:
-    """Deterministic S3 key for a judgment document."""
-    return f"judgments/{doc_id}.json"
+    """Deterministic S3 key for a judgment document (plain text)."""
+    return f"judgments/{doc_id}.txt"
+
+
+def _metadata_s3_key(document_s3_key: str) -> str:
+    """Returns the companion metadata S3 key for a given document key."""
+    return f"{document_s3_key}.metadata.json"
 
 
 async def _s3_key_exists(s3_key: str) -> bool:
@@ -243,20 +335,18 @@ async def _s3_key_exists(s3_key: str) -> bool:
         return False
 
 
-async def _write_to_s3(s3_key: str, document: dict) -> None:
-    """Writes a KB document to S3 as JSON."""
+async def _write_to_s3(s3_key: str, body: bytes, content_type: str) -> None:
+    """Writes bytes to S3."""
     import boto3
 
-    s3      = boto3.client("s3", region_name=AWS_REGION)
-    content = json.dumps(document, ensure_ascii=False, indent=2)
-
+    s3 = boto3.client("s3", region_name=AWS_REGION)
     s3.put_object(
         Bucket=JUDGMENT_KB_S3_BUCKET,
         Key=s3_key,
-        Body=content.encode("utf-8"),
-        ContentType="application/json",
+        Body=body,
+        ContentType=content_type,
     )
-    logger.debug("Wrote judgment to S3: %s", s3_key)
+    logger.debug("Wrote to S3: %s", s3_key)
 
 
 # ============================================================================
