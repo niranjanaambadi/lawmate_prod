@@ -66,14 +66,21 @@ _THINKING_KEYWORDS = {
 # Models that support extended thinking via Bedrock additionalModelRequestFields.
 # DeepSeek and Claude < 3.7 do NOT support it; passing the field causes a
 # ValidationException ("thinking.enabled.budget_tokens: Field required" or similar).
-# Application inference profile ARNs are included because the LawMate drafting
-# profile is backed by Claude 3.7 Sonnet which supports extended thinking.
+# Application inference profile ARNs are included because the LawMate profiles
+# are backed by Claude 3.7+ / Sonnet 4 which support extended thinking.
 _THINKING_CAPABLE_MODEL_PREFIXES = (
+    # Claude 3.7 Sonnet (first model with extended thinking)
     "us.anthropic.claude-3-7",
     "anthropic.claude-3-7",
     "eu.anthropic.claude-3-7",
     "ap.anthropic.claude-3-7",
-    "arn:aws:bedrock:",          # application-inference-profile ARNs
+    # Claude Sonnet 4 and later
+    "us.anthropic.claude-sonnet-4",
+    "anthropic.claude-sonnet-4",
+    "eu.anthropic.claude-sonnet-4",
+    "ap.anthropic.claude-sonnet-4",
+    # Application inference profile ARNs
+    "arn:aws:bedrock:",
 )
 
 
@@ -582,10 +589,10 @@ async def stream_chat(
     try:
         client = _bedrock_runtime()
         stream_kwargs: dict[str, Any] = dict(
-            modelId=_drafting_model(),
+            modelId=active_model,
             system=[{"text": system_prompt}],
             messages=convo_messages,
-            inferenceConfig={"maxTokens": 8192, "temperature": 0.3},
+            inferenceConfig={"maxTokens": 8192, "temperature": 1 if use_thinking else 0.3},
         )
         if extra_fields:
             stream_kwargs["additionalModelRequestFields"] = extra_fields
@@ -675,15 +682,20 @@ async def generate_draft(
     full_prompt = f"{docs_context}\n\n{prompt}" if docs_context else prompt
 
     try:
-        client   = _bedrock_runtime()
-        response = client.converse(
-            modelId=_drafting_model(),
+        client        = _bedrock_runtime()
+        draft_model   = _drafting_model()
+        converse_kwargs: dict[str, Any] = dict(
+            modelId=draft_model,
             messages=[{"role": "user", "content": [{"text": full_prompt}]}],
             inferenceConfig={"maxTokens": 16000, "temperature": 0.2},
-            additionalModelRequestFields={
-                "thinking": {"type": "enabled", "budgetTokens": 10000}
-            },
         )
+        if _model_supports_thinking(draft_model):
+            # Extended thinking requires temperature=1 per Bedrock/Anthropic spec
+            converse_kwargs["inferenceConfig"]["temperature"] = 1
+            converse_kwargs["additionalModelRequestFields"] = {
+                "thinking": {"type": "enabled", "budgetTokens": 10000}
+            }
+        response = client.converse(**converse_kwargs)
         content_blocks = (
             response.get("output", {})
             .get("message", {})
