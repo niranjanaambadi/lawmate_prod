@@ -198,9 +198,9 @@ export default function DraftingPage() {
         /* ── Main 3-panel layout ─────────────────────────────────────────── */
         <div className="flex flex-1 overflow-hidden">
           {/* Left: Document Vault */}
-          <div className="w-56 shrink-0 border-r border-slate-200 flex flex-col overflow-hidden">
-            <div className="px-3 pt-2 pb-1">
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+          <div className="w-56 shrink-0 border-r-2 border-slate-200 flex flex-col overflow-hidden bg-slate-50">
+            <div className="px-3 pt-3 pb-1.5 border-b border-slate-200">
+              <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-widest">
                 Documents
               </p>
             </div>
@@ -226,9 +226,9 @@ export default function DraftingPage() {
             {/* Chat + Studio side by side — resizable via drag handle */}
             <div ref={splitRef} className="flex flex-1 overflow-hidden">
               {/* Chat — takes the remaining width */}
-              <div className="flex flex-col overflow-hidden border-r border-slate-200" style={{ flex: `0 0 ${100 - studioPct}%`, minWidth: "20%" }}>
-                <div className="px-3 pt-2 pb-0.5">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+              <div className="flex flex-col overflow-hidden" style={{ flex: `0 0 ${100 - studioPct}%`, minWidth: "20%" }}>
+                <div className="px-3 pt-2.5 pb-1.5 border-b border-slate-200 bg-white">
+                  <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-widest">
                     Chat
                   </p>
                 </div>
@@ -239,22 +239,24 @@ export default function DraftingPage() {
                 />
               </div>
 
-              {/* Drag handle */}
+              {/* Drag handle — wider hit area with visible indicator line */}
               <div
                 onMouseDown={onSplitMouseDown}
-                className="w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-indigo-400 active:bg-indigo-500 transition-colors"
+                className="w-3 shrink-0 cursor-col-resize flex items-center justify-center bg-slate-100 hover:bg-indigo-100 active:bg-indigo-200 border-x border-slate-200 transition-colors group"
                 title="Drag to resize"
-              />
+              >
+                <div className="w-0.5 h-8 rounded-full bg-slate-300 group-hover:bg-indigo-400 transition-colors" />
+              </div>
 
               {/* Drafting Studio — width controlled by studioPct */}
               <div className="flex flex-col overflow-hidden" style={{ flex: `0 0 ${studioPct}%`, minWidth: "20%" }}>
-                <div className="px-3 pt-2 pb-0.5 flex items-center justify-between">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                <div className="px-3 pt-2.5 pb-1.5 border-b border-slate-200 bg-white flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-widest">
                     Drafting Studio
                   </p>
                   <button
                     onClick={() => openBriefModal()}
-                    className="text-[11px] text-indigo-600 hover:text-indigo-700"
+                    className="flex items-center gap-1 text-[11px] font-semibold bg-indigo-600 text-white px-2.5 py-1 rounded-md hover:bg-indigo-700 active:bg-indigo-800 shadow-sm transition-colors"
                   >
                     + New Draft
                   </button>

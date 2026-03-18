@@ -349,24 +349,24 @@ export default function DraftingStudio({
     <div className="flex flex-col h-full overflow-hidden">
 
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-slate-200 bg-slate-50 flex-wrap shrink-0">
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b-2 border-slate-200 bg-slate-50 flex-wrap shrink-0">
 
         {/* Draft selector */}
         <div className="relative mr-2">
           <button
             onClick={() => setDraftMenuOpen((o) => !o)}
-            className="flex items-center gap-1 text-xs text-slate-600 border border-slate-200 rounded px-2 py-0.5 hover:bg-white max-w-[140px]"
+            className="flex items-center gap-1 text-xs font-medium text-slate-700 border border-slate-300 rounded-md px-2 py-1 bg-white hover:border-indigo-400 hover:text-indigo-700 max-w-[160px] shadow-sm transition-colors"
           >
             <span className="truncate">{activeDraft.title.slice(0, 20)}…</span>
             <ChevronDown className="h-3 w-3 shrink-0" />
           </button>
           {draftMenuOpen && (
-            <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-20 max-h-48 overflow-y-auto">
+            <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto">
               {drafts.map((d) => (
                 <button
                   key={d.id}
                   onClick={() => { onSelectDraft(d.id); setDraftMenuOpen(false); }}
-                  className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-50 ${d.id === activeDraft.id ? "text-indigo-600 font-medium" : "text-slate-700"}`}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 transition-colors ${d.id === activeDraft.id ? "text-indigo-700 font-semibold bg-indigo-50" : "text-slate-700"}`}
                 >
                   <p className="truncate">{d.title}</p>
                   <p className="text-slate-400 text-[10px]">v{d.version}</p>
@@ -376,7 +376,7 @@ export default function DraftingStudio({
           )}
         </div>
 
-        <div className="h-4 w-px bg-slate-200 mx-1" />
+        <div className="h-5 w-px bg-slate-300 mx-1" />
 
         {/* Format buttons */}
         <ToolbarBtn onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold">
@@ -398,25 +398,25 @@ export default function DraftingStudio({
           <ListOrdered className="h-3.5 w-3.5" />
         </ToolbarBtn>
 
-        <div className="h-4 w-px bg-slate-200 mx-1" />
+        <div className="h-5 w-px bg-slate-300 mx-1" />
 
         {/* AI Assist */}
         <div className="relative">
           <button
             onClick={() => setShowAIMenu((o) => !o)}
-            className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-2 py-0.5 rounded hover:bg-indigo-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 text-xs font-semibold bg-indigo-600 text-white px-2.5 py-1 rounded-md hover:bg-indigo-700 active:bg-indigo-800 shadow-sm transition-colors disabled:opacity-50"
             disabled={aiProcessing}
           >
-            {aiProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            {aiProcessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             AI Assist
           </button>
           {showAIMenu && (
-            <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg z-20">
+            <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-xl z-20">
               {AI_ASSIST_OPTIONS.map((opt) => (
                 <button
                   key={opt.label}
                   onClick={() => handleAIAssist(opt.prompt)}
-                  className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 first:rounded-t-lg last:rounded-b-lg"
+                  className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 first:rounded-t-lg last:rounded-b-lg transition-colors"
                 >
                   {opt.label}
                 </button>
@@ -426,13 +426,13 @@ export default function DraftingStudio({
         </div>
 
         {/* Right-side actions */}
-        <div className="ml-auto flex items-center gap-1">
-          <span className="text-[10px] text-slate-400">v{activeDraft.version}</span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-400 font-medium">v{activeDraft.version}</span>
 
           {/* Copy */}
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 px-1.5 py-0.5 rounded"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600 border border-transparent hover:border-slate-200 px-1.5 py-1 rounded-md transition-colors"
             title="Copy plain text"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
@@ -443,7 +443,7 @@ export default function DraftingStudio({
             <button
               onClick={() => setExportMenuOpen((o) => !o)}
               disabled={exportBusy}
-              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 px-2 py-0.5 rounded disabled:opacity-50"
+              className="flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-indigo-700 border border-slate-300 bg-white hover:border-indigo-400 px-2.5 py-1 rounded-md shadow-sm transition-colors disabled:opacity-50"
               title="Export"
             >
               {exportBusy
@@ -452,48 +452,48 @@ export default function DraftingStudio({
               }
               <span>
                 {driveStatus === "done"
-                  ? <span className="text-green-600 text-[11px]">Saved!</span>
+                  ? <span className="text-green-600">Saved!</span>
                   : driveStatus === "error"
-                  ? <span className="text-red-500 text-[11px]">Error</span>
+                  ? <span className="text-red-500">Error</span>
                   : "Export"}
               </span>
               <ChevronDown className="h-3 w-3" />
             </button>
 
             {exportMenuOpen && (
-              <div className="absolute top-full right-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1">
+              <div className="absolute top-full right-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-xl z-30 py-1">
 
                 {/* DOCX section */}
-                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                <p className="px-3 pt-1.5 pb-0.5 text-[10px] font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1">
                   <FileText className="h-3 w-3" /> Word (.docx)
                 </p>
                 <button
                   onClick={handleDownloadDocxLocal}
-                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
                 >
                   <Monitor className="h-3.5 w-3.5 text-slate-400" />
                   This computer
                 </button>
                 <button
                   onClick={handleUploadDocxToDrive}
-                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
                 >
                   <Cloud className="h-3.5 w-3.5 text-blue-500" />
                   Google Drive
                 </button>
 
-                <div className="border-t border-slate-100 my-1" />
+                <div className="border-t border-slate-200 my-1" />
 
                 {/* PDF section */}
-                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                <p className="px-3 pt-1.5 pb-0.5 text-[10px] font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1">
                   <FileText className="h-3 w-3" /> PDF
                 </p>
                 <button
                   onClick={handlePrintPDF}
-                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
                 >
                   <Monitor className="h-3.5 w-3.5 text-slate-400" />
-                  This computer (print → Save as PDF)
+                  Save as PDF
                 </button>
               </div>
             )}
@@ -526,7 +526,7 @@ function ToolbarBtn({
     <button
       onClick={onClick}
       title={title}
-      className="p-1 rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700"
+      className="p-1.5 rounded-md text-slate-600 hover:bg-indigo-100 hover:text-indigo-700 active:bg-indigo-200 transition-colors"
     >
       {children}
     </button>

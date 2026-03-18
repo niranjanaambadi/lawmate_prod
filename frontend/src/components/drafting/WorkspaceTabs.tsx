@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { Plus, X, ChevronDown } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import type { Workspace } from "@/stores/workspaceStore";
 
 interface Props {
@@ -34,17 +34,9 @@ export default function WorkspaceTabs({
   };
 
   return (
-    <div className="flex items-center overflow-x-auto border-b border-slate-200 bg-white shrink-0 h-10">
-      {/* New workspace button */}
-      <button
-        onClick={onCreate}
-        title="New workspace"
-        className="flex items-center gap-1 px-3 h-full text-slate-500 hover:text-indigo-600 hover:bg-slate-50 border-r border-slate-200 shrink-0 text-sm"
-      >
-        <Plus className="h-4 w-4" />
-      </button>
+    <div className="flex items-center overflow-x-auto border-b-2 border-indigo-100 bg-slate-50 shrink-0 h-10">
 
-      {/* Tab pills */}
+      {/* Tab pills — rendered first so + appears to their right */}
       {workspaces.map((ws) => {
         const isActive = ws.id === activeId;
         return (
@@ -52,10 +44,10 @@ export default function WorkspaceTabs({
             key={ws.id}
             onClick={() => onSwitch(ws.id)}
             className={[
-              "flex items-center gap-1.5 px-3 h-full cursor-pointer border-r border-slate-200 shrink-0 max-w-[160px] group",
+              "flex items-center gap-1.5 px-4 h-full cursor-pointer border-r border-slate-200 shrink-0 max-w-[180px] group select-none transition-colors",
               isActive
-                ? "bg-white border-b-2 border-b-indigo-500 text-slate-800"
-                : "text-slate-500 hover:bg-slate-50 hover:text-slate-700",
+                ? "bg-white border-b-2 border-b-indigo-600 text-indigo-700 font-semibold shadow-sm"
+                : "text-slate-500 hover:bg-white hover:text-slateigo-700",
             ].join(" ")}
           >
             {editingId === ws.id ? (
@@ -69,7 +61,7 @@ export default function WorkspaceTabs({
                   if (e.key === "Escape") setEditingId(null);
                 }}
                 onClick={(e) => e.stopPropagation()}
-                className="w-24 text-xs outline-none border-b border-indigo-400 bg-transparent"
+                className="w-28 text-xs outline-none border-b-2 border-indigo-500 bg-transparent"
               />
             ) : (
               <span
@@ -81,7 +73,8 @@ export default function WorkspaceTabs({
             )}
             <button
               onClick={(e) => { e.stopPropagation(); onClose(ws.id); }}
-              className="ml-auto opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity"
+              className="ml-auto opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity rounded"
+              title="Close workspace"
             >
               <X className="h-3 w-3" />
             </button>
@@ -89,12 +82,24 @@ export default function WorkspaceTabs({
         );
       })}
 
+      {/* ── New workspace button — sits immediately after the last tab ── */}
+      <button
+        onClick={onCreate}
+        title="New workspace"
+        className="flex items-center justify-center w-8 h-7 mx-1.5 rounded-md shrink-0 bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 shadow-sm transition-colors"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+
+      {/* Spacer fills the rest of the bar */}
+      <div className="flex-1" />
+
       {/* Mobile fallback — hidden on md+ */}
-      <div className="md:hidden ml-auto pr-2">
+      <div className="md:hidden pr-2">
         <select
           value={activeId ?? ""}
           onChange={(e) => onSwitch(e.target.value)}
-          className="text-xs border border-slate-200 rounded px-1 py-0.5"
+          className="text-xs border border-slate-300 rounded px-1 py-0.5"
         >
           {workspaces.map((ws) => (
             <option key={ws.id} value={ws.id}>{ws.label}</option>
