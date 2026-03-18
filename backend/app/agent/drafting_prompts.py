@@ -1289,9 +1289,15 @@ MANDATORY NOTES:
 # HELPER FUNCTION
 # ===========================================================================
 
-def get_drafting_prompt(doc_type: str) -> str:
+def get_drafting_prompt(
+    doc_type: str,
+    case_context: str = "",
+    brief: str = "",
+    precedents: str = "",
+) -> str:
     """
-    Return the drafting prompt for the given docType.
+    Return the drafting prompt for the given docType, optionally enriched with
+    case context, a lawyer-provided brief, and retrieved precedents.
 
     Tier 1 types return a full custom prompt.
     Tier 2 types return a context-aware generic prompt with the correct
@@ -1299,13 +1305,36 @@ def get_drafting_prompt(doc_type: str) -> str:
     Unknown types fall back to a fully generic prompt.
 
     Args:
-        doc_type: One of the DraftType constant values
+        doc_type:     One of the DraftType constant values
+        case_context: Pre-formatted case context string from the workspace (optional)
+        brief:        Lawyer's free-text instructions / drafting brief (optional)
+        precedents:   Relevant precedent chunks retrieved from KB (optional)
 
     Returns:
         Drafting instructions string to inject into the generation call
     """
+    def _append_context(base: str) -> str:
+        """Append optional context blocks to the base prompt."""
+        parts = [base.rstrip()]
+        if case_context and case_context.strip():
+            parts.append(
+                "\n\n## CASE CONTEXT (extracted from uploaded documents)\n\n"
+                + case_context.strip()
+            )
+        if brief and brief.strip():
+            parts.append(
+                "\n\n## LAWYER'S DRAFTING BRIEF\n\n"
+                + brief.strip()
+            )
+        if precedents and precedents.strip():
+            parts.append(
+                "\n\n## RETRIEVED PRECEDENTS (verify before citing)\n\n"
+                + precedents.strip()
+            )
+        return "\n".join(parts)
+
     if doc_type in DRAFTING_PROMPTS:
-        return DRAFTING_PROMPTS[doc_type]
+        return _append_context(DRAFTING_PROMPTS[doc_type])
 
     # Tier 2 lookup — known types with metadata but no custom prompt
     TIER_2_METADATA: dict[str, dict] = {
@@ -1351,7 +1380,7 @@ def get_drafting_prompt(doc_type: str) -> str:
 
     if doc_type in TIER_2_METADATA:
         meta = TIER_2_METADATA[doc_type]
-        return f"""
+        return _append_context(f"""
 Draft a {meta['abbr']} ({doc_type}) for filing before the Kerala High Court.
 
 COURT AND PROCEDURAL DETAILS:
@@ -1387,10 +1416,10 @@ Ensure:
 - All factual claims trace to uploaded documents
 - Use [FACT NEEDED: description] for missing facts
 - Follow KHC formatting requirements [Rule 35, KHC Rules]
-"""
+""")
 
     # Fully generic fallback for completely unknown types
-    return f"""
+    return _append_context(f"""
 Draft a {doc_type} for filing before the Kerala High Court.
 
 STRUCTURE:
@@ -1412,7 +1441,7 @@ Ensure:
 - Include correct court fee reference
 - Include limitation period if applicable
 - Follow KHC formatting requirements [Rule 35, KHC Rules]
-"""
+""")
 
 
 # ===========================================================================
