@@ -6,6 +6,9 @@ Routes
 POST /api/v1/translate/text
     Translate a plain-text payload.
 
+POST /api/v1/translate/text/stream
+    Translate a plain-text payload via SSE streaming.
+
 POST /api/v1/translate/document
     Translate an uploaded file (PDF / DOCX / TXT).
 
@@ -15,6 +18,7 @@ POST /api/v1/translate/export
 from __future__ import annotations
 
 import io
+import json
 import logging
 from typing import List, Literal, Optional
 
@@ -32,6 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 Direction = Literal["en_to_ml", "ml_to_en"]
+DirectionInput = Literal["en_to_ml", "ml_to_en", "auto"]
 
 _ALLOWED_MIME_TYPES = {
     "application/pdf",
@@ -40,16 +45,42 @@ _ALLOWED_MIME_TYPES = {
     "text/plain",
 }
 
-_MAX_TEXT_CHARS = 15_000   # ~3 000 words — comfortable single-request ceiling
+_MAX_TEXT_CHARS = 15_000   # ~3 000 words
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+# ── Direction auto-detection (Task 3) ──────────────────────────────────────
+
+def detect_direction(text: str) -> Direction:
+    """
+    Auto-detect the translation direction from script composition.
+
+    Counts alphabetic characters in the Malayalam Unicode block (U+0D00–U+0D7F).
+    If more than 30 % of all alphabetic characters are Malayalam, the text is
+    assumed to be Malayalam and the direction is "ml_to_en"; otherwise "en_to_ml".
+    """
+    total = 0
+    malayalam = 0
+    for ch in text:
+        if ch.isalpha():
+            total += 1
+            if 0x0D00 <= ord(ch) <= 0x0D7F:
+                malayalam += 1
+    if total == 0:
+        return "en_to_ml"
+    return "ml_to_en" if (malayalam / total) > 0.30 else "en_to_ml"
 
 
 # ── Request / response schemas ─────────────────────────────────────────────
 
+class GlossaryTerm(BaseModel):
+    source: str
+    target: str
+
 
 class TranslateTextRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=_MAX_TEXT_CHARS)
-    direction: Direction = "en_to_ml"
+    direction: DirectionInput = "en_to_ml"
 
 
 class TranslateTextResponse(BaseModel):
@@ -58,6 +89,7 @@ class TranslateTextResponse(BaseModel):
     glossary_hits: int
     warnings: List[str]
     char_count: int
+    glossary_terms: List[GlossaryTerm] = []
 
 
 class TranslateDocumentResponse(BaseModel):
@@ -80,6 +112,7 @@ class TranslateDocumentResponse(BaseModel):
     summary="Translate legal text",
     description=(
         "Translate a plain-text legal document between English and Malayalam. "
+        "Pass direction='auto' to let the service detect the language automatically. "
         "Protected entities (case numbers, acts, dates, Latin phrases) are preserved verbatim."
     ),
 )
@@ -88,8 +121,15 @@ def translate_text(
     current_user: User = Depends(get_current_user),
 ) -> TranslateTextResponse:
     """Translate a plain-text payload."""
+    # Resolve direction
+    direction: Direction = (
+        detect_direction(payload.text)
+        if payload.direction == "auto"
+        else payload.direction  # type: ignore[assignment]
+    )
+
     try:
-        result = llm_translate_service.translate_text(payload.text, payload.direction)
+        result = llm_translate_service.translate_text(payload.text, direction)
     except RuntimeError as exc:
         logger.error("translate/text failed: %s", exc)
         raise HTTPException(
@@ -97,12 +137,65 @@ def translate_text(
             detail=f"Translation service error: {exc}",
         )
 
+    glossary_terms = [
+        GlossaryTerm(source=g["source"], target=g["target"])
+        for g in result.get("glossary_terms", [])
+    ]
+
     return TranslateTextResponse(
         translated=result["translated"],
-        direction=payload.direction,
+        direction=direction,
         glossary_hits=result["glossary_hits"],
         warnings=result["warnings"],
         char_count=len(payload.text),
+        glossary_terms=glossary_terms,
+    )
+
+
+@router.post(
+    "/text/stream",
+    summary="Stream-translate legal text (SSE)",
+    description=(
+        "Stream a translation using Server-Sent Events. "
+        "Raw token chunks are emitted as they arrive; "
+        "the final 'done' event contains the fully restored clean translation."
+    ),
+)
+def translate_text_stream(
+    payload: TranslateTextRequest,
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream the translation of a plain-text payload via SSE."""
+    direction: Direction = (
+        detect_direction(payload.text)
+        if payload.direction == "auto"
+        else payload.direction  # type: ignore[assignment]
+    )
+
+    def generate():
+        try:
+            for item in llm_translate_service.stream_translate_text(
+                payload.text, direction
+            ):
+                if isinstance(item, dict):
+                    # Final done event — add char_count and direction
+                    item["char_count"] = len(payload.text)
+                    item["direction"] = direction
+                    yield f"data: {json.dumps(item)}\n\n"
+                else:
+                    # Raw text chunk
+                    yield f"data: {json.dumps({'text': item})}\n\n"
+        except RuntimeError as exc:
+            logger.error("translate/text/stream failed: %s", exc)
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -121,8 +214,6 @@ async def translate_document(
     current_user: User = Depends(get_current_user),
 ) -> TranslateDocumentResponse:
     """Translate an uploaded document."""
-
-    # Validate MIME type
     content_type = (file.content_type or "").split(";")[0].strip()
     if content_type not in _ALLOWED_MIME_TYPES:
         raise HTTPException(
@@ -133,7 +224,6 @@ async def translate_document(
             ),
         )
 
-    # Read and validate size
     data = await file.read()
     if len(data) > _MAX_FILE_BYTES:
         raise HTTPException(
@@ -144,7 +234,9 @@ async def translate_document(
     try:
         result = document_translate_service.translate_bytes(data, content_type, direction)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
     except RuntimeError as exc:
         logger.error("translate/document failed: %s", exc)
         raise HTTPException(
@@ -199,7 +291,6 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
 
     styles = getSampleStyleSheet()
 
-    # Try to register a Unicode font for Malayalam; fall back gracefully
     font_name = "Helvetica"
     font_candidates = [
         "/System/Library/Fonts/Supplemental/NotoSansMalayalam.ttf",
@@ -249,7 +340,6 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
         para = para.strip()
         if not para:
             continue
-        # Escape XML special chars for reportlab Paragraph
         safe = para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         story.append(Paragraph(safe, body_style))
         story.append(Spacer(1, 4))
@@ -260,23 +350,19 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
 
 def _build_docx(text: str, title: str, direction: str) -> bytes:
     """Generate a DOCX using python-docx."""
-    import docx  # python-docx
+    import docx
 
     document = docx.Document()
-
-    # Title
     document.add_heading(title, level=1)
 
-    # Metadata paragraph
     dir_label = "English → Malayalam" if direction == "en_to_ml" else "Malayalam → English"
     meta = document.add_paragraph()
     run = meta.add_run(f"Legal Translation  ·  {dir_label}")
     run.italic = True
     run.font.color.rgb = docx.shared.RGBColor(0x88, 0x88, 0x88)
 
-    document.add_paragraph()  # spacer
+    document.add_paragraph()
 
-    # Body paragraphs
     for para in text.split("\n\n"):
         para = para.strip()
         if not para:
@@ -298,10 +384,7 @@ def export_translation(
     payload: ExportRequest,
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    """
-    Generate a formatted PDF or DOCX from translated text and return it
-    as a file download.
-    """
+    """Generate a formatted PDF or DOCX from translated text."""
     try:
         if payload.format == "pdf":
             file_bytes = _build_pdf(payload.text, payload.title, payload.direction)
@@ -320,7 +403,9 @@ def export_translation(
             detail=f"Export failed: {exc}",
         )
 
-    safe_title = "".join(c if c.isalnum() or c in "-_ " else "_" for c in payload.title)
+    safe_title = "".join(
+        c if c.isalnum() or c in "-_ " else "_" for c in payload.title
+    )
     filename = f"{safe_title}_{payload.direction}.{ext}"
 
     return StreamingResponse(

@@ -1420,12 +1420,29 @@ export async function importExternalDocument(
 // ── Translation ────────────────────────────────────────────────────────────
 
 export type TranslateDirection = "en_to_ml" | "ml_to_en";
+export type TranslateDirectionInput = TranslateDirection | "auto";
+
+export interface GlossaryTerm {
+  source: string;
+  target: string;
+}
 
 export interface TranslateTextResponse {
   translated: string;
   direction: TranslateDirection;
   glossary_hits: number;
   warnings: string[];
+  char_count: number;
+  glossary_terms: GlossaryTerm[];
+}
+
+export interface TranslateStreamDoneEvent {
+  done: true;
+  full_text: string;
+  warnings: string[];
+  glossary_hits: number;
+  glossary_terms: GlossaryTerm[];
+  direction: TranslateDirection;
   char_count: number;
 }
 
@@ -1441,11 +1458,12 @@ export interface TranslateDocumentResponse {
 }
 
 /**
- * Translate a plain-text legal document.
+ * Translate a plain-text legal document (non-streaming).
+ * Pass direction="auto" to let the backend detect the language.
  */
 export async function translateText(
   text: string,
-  direction: TranslateDirection,
+  direction: TranslateDirectionInput,
   token: string | null
 ): Promise<TranslateTextResponse> {
   return apiRequest<TranslateTextResponse>("/api/v1/translate/text", {
@@ -1454,6 +1472,93 @@ export async function translateText(
     timeoutMs: 120_000,
     body: JSON.stringify({ text, direction }),
   });
+}
+
+/**
+ * Translate via SSE streaming.
+ * Calls onChunk for each raw text chunk, onDone when the clean result is ready,
+ * and onError on failure.  Returns a cleanup function to abort the stream.
+ */
+export function translateTextStream(
+  text: string,
+  direction: TranslateDirectionInput,
+  token: string | null,
+  onChunk: (chunk: string) => void,
+  onDone: (result: TranslateStreamDoneEvent) => void,
+  onError: (err: string) => void
+): () => void {
+  const baseUrl = (
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_API_URL || ""
+      : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  ).replace(/\/$/, "");
+
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`${baseUrl}/api/v1/translate/text/stream`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text, direction }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        onError((err as { detail?: string }).detail || res.statusText || "Stream failed");
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) { onError("No response body"); return; }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE lines: "data: {...}\n\n"
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";   // keep incomplete last chunk
+
+        for (const eventStr of events) {
+          const line = eventStr.replace(/^data:\s*/, "").trim();
+          if (!line) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.error) {
+              onError(parsed.error);
+              return;
+            }
+            if (parsed.done) {
+              onDone(parsed as TranslateStreamDoneEvent);
+              return;
+            }
+            if (parsed.text) {
+              onChunk(parsed.text);
+            }
+          } catch {
+            // ignore malformed SSE lines
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name === "AbortError") return;
+      onError(err instanceof Error ? err.message : "Stream error");
+    }
+  })();
+
+  return () => controller.abort();
 }
 
 /**

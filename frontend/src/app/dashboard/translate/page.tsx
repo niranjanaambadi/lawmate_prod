@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  translateText,
+  translateTextStream,
   translateDocument,
   exportTranslation,
   openCaseNotebook,
   createNotebookNote,
   getCases,
   TranslateDirection,
+  TranslateDirectionInput,
   TranslateTextResponse,
   TranslateDocumentResponse,
+  GlossaryTerm,
   CaseOption,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -35,8 +37,10 @@ import {
   Languages,
   Loader2,
   NotebookPen,
+  Scan,
   Upload,
   X,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +78,67 @@ const ALLOWED_TYPES = [
   "text/plain",
 ];
 
+// ── Glossary term highlighting (Task 7) ────────────────────────────────────
+
+interface GlossaryHighlightProps {
+  text: string;
+  terms: GlossaryTerm[];
+  direction: TranslateDirection;
+}
+
+function GlossaryHighlight({ text, terms, direction }: GlossaryHighlightProps) {
+  if (!terms.length) {
+    return (
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+        {text}
+      </p>
+    );
+  }
+
+  // Highlight the *target*-language terms that appear in the translated output
+  const sorted = [...terms].sort((a, b) => b.target.length - a.target.length);
+
+  const escaped = sorted
+    .map((t) => t.target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .filter(Boolean)
+    .join("|");
+
+  if (!escaped) {
+    return (
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+        {text}
+      </p>
+    );
+  }
+
+  const regex = new RegExp(`(${escaped})`, "g");
+  const parts = text.split(regex);
+
+  return (
+    <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+      {parts.map((part, i) => {
+        const term = sorted.find((t) => t.target === part);
+        if (term) {
+          const tooltip =
+            direction === "en_to_ml"
+              ? `Glossary (EN): ${term.source}`
+              : `Glossary (ML): ${term.source}`;
+          return (
+            <span
+              key={i}
+              className="border-b border-dotted border-indigo-400 text-indigo-700 cursor-help"
+              title={tooltip}
+            >
+              {part}
+            </span>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </p>
+  );
+}
+
 // ── Quality panel ──────────────────────────────────────────────────────────
 
 interface QualityPanelProps {
@@ -83,7 +148,12 @@ interface QualityPanelProps {
   chunks?: number;
 }
 
-function QualityPanel({ glossaryHits, warnings, charCount, chunks }: QualityPanelProps) {
+function QualityPanel({
+  glossaryHits,
+  warnings,
+  charCount,
+  chunks,
+}: QualityPanelProps) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3 text-sm">
       <p className="font-medium text-slate-700 flex items-center gap-2">
@@ -92,22 +162,35 @@ function QualityPanel({ glossaryHits, warnings, charCount, chunks }: QualityPane
       </p>
       <div className="grid grid-cols-2 gap-3 text-slate-600">
         <div>
-          <p className="text-xs text-slate-400 uppercase tracking-wide">Glossary matches</p>
+          <p className="text-xs text-slate-400 uppercase tracking-wide">
+            Glossary matches
+          </p>
           <p className="font-semibold text-indigo-600">{glossaryHits}</p>
         </div>
         <div>
-          <p className="text-xs text-slate-400 uppercase tracking-wide">Characters</p>
+          <p className="text-xs text-slate-400 uppercase tracking-wide">
+            Characters
+          </p>
           <p className="font-semibold">{charCount.toLocaleString()}</p>
         </div>
         {chunks !== undefined && (
           <div>
-            <p className="text-xs text-slate-400 uppercase tracking-wide">Chunks processed</p>
+            <p className="text-xs text-slate-400 uppercase tracking-wide">
+              Chunks processed
+            </p>
             <p className="font-semibold">{chunks}</p>
           </div>
         )}
         <div>
-          <p className="text-xs text-slate-400 uppercase tracking-wide">Warnings</p>
-          <p className={cn("font-semibold", warnings.length > 0 ? "text-amber-600" : "text-green-600")}>
+          <p className="text-xs text-slate-400 uppercase tracking-wide">
+            Warnings
+          </p>
+          <p
+            className={cn(
+              "font-semibold",
+              warnings.length > 0 ? "text-amber-600" : "text-green-600"
+            )}
+          >
             {warnings.length === 0 ? "None" : warnings.length}
           </p>
         </div>
@@ -115,7 +198,10 @@ function QualityPanel({ glossaryHits, warnings, charCount, chunks }: QualityPane
       {warnings.length > 0 && (
         <div className="space-y-1">
           {warnings.map((w, i) => (
-            <p key={i} className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+            <p
+              key={i}
+              className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1"
+            >
               <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
               {w}
             </p>
@@ -140,7 +226,8 @@ function ExportMenu({ disabled, onExport, loading }: ExportMenuProps) {
 
   useEffect(() => {
     function close(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     }
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
@@ -166,14 +253,20 @@ function ExportMenu({ disabled, onExport, loading }: ExportMenuProps) {
         <div className="absolute right-0 mt-1 w-40 rounded-md border border-slate-200 bg-white shadow-lg z-10">
           <button
             className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 text-slate-700"
-            onClick={() => { onExport("pdf"); setOpen(false); }}
+            onClick={() => {
+              onExport("pdf");
+              setOpen(false);
+            }}
           >
             <FileText className="h-4 w-4 text-red-500" />
             Download PDF
           </button>
           <button
             className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 text-slate-700"
-            onClick={() => { onExport("docx"); setOpen(false); }}
+            onClick={() => {
+              onExport("docx");
+              setOpen(false);
+            }}
           >
             <FileText className="h-4 w-4 text-blue-500" />
             Download DOCX
@@ -193,7 +286,12 @@ interface AddToCaseModalProps {
   onClose: () => void;
 }
 
-function AddToCaseModal({ translated, direction, token, onClose }: AddToCaseModalProps) {
+function AddToCaseModal({
+  translated,
+  direction,
+  token,
+  onClose,
+}: AddToCaseModalProps) {
   const [cases, setCases] = useState<CaseOption[]>([]);
   const [loadingCases, setLoadingCases] = useState(true);
   const [selectedCaseId, setSelectedCaseId] = useState("");
@@ -217,14 +315,15 @@ function AddToCaseModal({ translated, direction, token, onClose }: AddToCaseModa
     setSaving(true);
     setError(null);
     try {
-      // Build ProseMirror JSON from plain paragraphs
       const paragraphs = translated
         .split("\n\n")
         .map((p) => p.trim())
         .filter(Boolean)
-        .map((p) => ({ type: "paragraph", content: [{ type: "text", text: p }] }));
+        .map((p) => ({
+          type: "paragraph",
+          content: [{ type: "text", text: p }],
+        }));
       const content_json = { type: "doc", content: paragraphs };
-
       const notebook = await openCaseNotebook(selectedCaseId, token);
       await createNotebookNote(
         notebook.id,
@@ -233,8 +332,8 @@ function AddToCaseModal({ translated, direction, token, onClose }: AddToCaseModa
       );
       setSaved(true);
       setTimeout(onClose, 1500);
-    } catch (err: any) {
-      setError(err.message ?? "Failed to save note.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save note.");
     } finally {
       setSaving(false);
     }
@@ -246,32 +345,41 @@ function AddToCaseModal({ translated, direction, token, onClose }: AddToCaseModa
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-        {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div className="flex items-center gap-2">
             <NotebookPen className="h-5 w-5 text-indigo-600" />
-            <h2 className="text-base font-semibold text-slate-800">Add to Case Notebook</h2>
+            <h2 className="text-base font-semibold text-slate-800">
+              Add to Case Notebook
+            </h2>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Body */}
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Note title</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Note title
+            </label>
             <input
               type="text"
               value={noteTitle}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNoteTitle(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setNoteTitle(e.target.value)
+              }
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               maxLength={200}
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Select case</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Select case
+            </label>
             {loadingCases ? (
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -301,7 +409,8 @@ function AddToCaseModal({ translated, direction, token, onClose }: AddToCaseModa
               Preview (first 200 chars)
             </label>
             <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 font-mono leading-relaxed">
-              {translated.slice(0, 200)}{translated.length > 200 ? "…" : ""}
+              {translated.slice(0, 200)}
+              {translated.length > 200 ? "…" : ""}
             </div>
           </div>
 
@@ -320,9 +429,13 @@ function AddToCaseModal({ translated, direction, token, onClose }: AddToCaseModa
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button
@@ -364,17 +477,30 @@ interface ActionBarProps {
   copied: boolean;
 }
 
-function ActionBar({ translated, direction, title, token, onCopy, copied }: ActionBarProps) {
+function ActionBar({
+  translated,
+  direction,
+  title,
+  token,
+  onCopy,
+  copied,
+}: ActionBarProps) {
   const [exportLoading, setExportLoading] = useState(false);
   const [showAddToCase, setShowAddToCase] = useState(false);
 
   async function handleExport(fmt: "pdf" | "docx") {
     setExportLoading(true);
     try {
-      const blob = await exportTranslation(translated, title, direction, fmt, token);
+      const blob = await exportTranslation(
+        translated,
+        title,
+        direction,
+        fmt,
+        token
+      );
       triggerDownload(blob, `${title}_${direction}.${fmt}`);
-    } catch (err: any) {
-      alert(err.message ?? "Export failed.");
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Export failed.");
     } finally {
       setExportLoading(false);
     }
@@ -403,7 +529,11 @@ function ActionBar({ translated, direction, title, token, onCopy, copied }: Acti
           loading={exportLoading}
         />
 
-        <Button variant="outline" size="sm" onClick={() => setShowAddToCase(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowAddToCase(true)}
+        >
           <FolderOpen className="mr-2 h-4 w-4" />
           Add to Case
         </Button>
@@ -426,58 +556,145 @@ function ActionBar({ translated, direction, title, token, onCopy, copied }: Acti
 export default function TranslatePage() {
   const { token } = useAuth();
 
+  // Direction state
+  const [autoDetect, setAutoDetect] = useState(false);
   const [direction, setDirection] = useState<TranslateDirection>("en_to_ml");
   const [activeTab, setActiveTab] = useState<Tab>("text");
 
+  // Text-mode state
   const [inputText, setInputText] = useState("");
-  const [textResult, setTextResult] = useState<TranslateTextResponse | null>(null);
+  const [textResult, setTextResult] = useState<TranslateTextResponse | null>(
+    null
+  );
   const [textLoading, setTextLoading] = useState(false);
   const [textError, setTextError] = useState<string | null>(null);
   const [textCopied, setTextCopied] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const streamAbortRef = useRef<(() => void) | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Document-mode state
   const [docFile, setDocFile] = useState<File | null>(null);
-  const [docResult, setDocResult] = useState<TranslateDocumentResponse | null>(null);
+  const [docResult, setDocResult] = useState<TranslateDocumentResponse | null>(
+    null
+  );
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [docCopied, setDocCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { from, to } = directionLabel(direction);
+  // For display: use resolved direction from result, or the manual selection
+  const displayDirection: TranslateDirection =
+    (textResult?.direction as TranslateDirection) ?? direction;
+  const { from, to } = directionLabel(displayDirection);
+
+  // Cleanup stream on unmount
+  useEffect(() => {
+    return () => {
+      streamAbortRef.current?.();
+    };
+  }, []);
 
   function toggleDirection() {
+    if (autoDetect) return;
     setDirection((d) => (d === "en_to_ml" ? "ml_to_en" : "en_to_ml"));
     setTextResult(null);
     setDocResult(null);
     setTextError(null);
     setDocError(null);
+    setStreamingText("");
   }
 
-  async function handleTranslateText() {
-    if (!inputText.trim()) return;
+  function toggleAutoDetect() {
+    setAutoDetect((v) => !v);
+    setTextResult(null);
+    setStreamingText("");
+    setTextError(null);
+  }
+
+  // ── Text translation with streaming (Task 4) ─────────────────────────────
+
+  function handleTranslateText() {
+    if (!inputText.trim() || textLoading) return;
+
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+
     setTextLoading(true);
+    setIsStreaming(true);
     setTextError(null);
     setTextResult(null);
-    try {
-      setTextResult(await translateText(inputText, direction, token));
-    } catch (err: any) {
-      setTextError(err.message ?? "Translation failed.");
-    } finally {
-      setTextLoading(false);
-    }
+    setStreamingText("");
+
+    const dir: TranslateDirectionInput = autoDetect ? "auto" : direction;
+
+    const abort = translateTextStream(
+      inputText,
+      dir,
+      token,
+      (chunk) => {
+        setStreamingText((prev) => prev + chunk);
+      },
+      (done) => {
+        setIsStreaming(false);
+        setTextLoading(false);
+        streamAbortRef.current = null;
+        const resolved = done.direction as TranslateDirection;
+        // Update manual direction pill to match detected direction
+        if (autoDetect) setDirection(resolved);
+        setTextResult({
+          translated: done.full_text,
+          direction: resolved,
+          glossary_hits: done.glossary_hits,
+          warnings: done.warnings,
+          char_count: done.char_count,
+          glossary_terms: done.glossary_terms,
+        });
+        setStreamingText("");
+      },
+      (err) => {
+        setIsStreaming(false);
+        setTextLoading(false);
+        streamAbortRef.current = null;
+        setTextError(err);
+        setStreamingText("");
+      }
+    );
+
+    streamAbortRef.current = abort;
   }
 
+  // Ctrl+Enter / Cmd+Enter shortcut (Task 7)
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        handleTranslateText();
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [inputText, textLoading, autoDetect, direction, token]
+  );
+
   async function copyText() {
-    if (!textResult) return;
-    await navigator.clipboard.writeText(textResult.translated);
+    const text = textResult?.translated ?? streamingText;
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
     setTextCopied(true);
     setTimeout(() => setTextCopied(false), 2000);
   }
 
+  // ── Document translation ──────────────────────────────────────────────────
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0] ?? null;
     if (!file) return;
-    if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(pdf|docx|doc|txt)$/i)) {
-      setDocError("Unsupported file type. Please upload a PDF, DOCX, or TXT file.");
+    if (
+      !ALLOWED_TYPES.includes(file.type) &&
+      !file.name.match(/\.(pdf|docx|doc|txt)$/i)
+    ) {
+      setDocError("Unsupported file type. Please upload a PDF, DOCX, or TXT.");
       return;
     }
     setDocFile(file);
@@ -489,7 +706,10 @@ export default function TranslatePage() {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0] ?? null;
     if (!file) return;
-    if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(pdf|docx|doc|txt)$/i)) {
+    if (
+      !ALLOWED_TYPES.includes(file.type) &&
+      !file.name.match(/\.(pdf|docx|doc|txt)$/i)
+    ) {
       setDocError("Unsupported file type.");
       return;
     }
@@ -505,8 +725,10 @@ export default function TranslatePage() {
     setDocResult(null);
     try {
       setDocResult(await translateDocument(docFile, direction, token));
-    } catch (err: any) {
-      setDocError(err.message ?? "Document translation failed.");
+    } catch (err: unknown) {
+      setDocError(
+        err instanceof Error ? err.message : "Document translation failed."
+      );
     } finally {
       setDocLoading(false);
     }
@@ -518,6 +740,8 @@ export default function TranslatePage() {
     setDocCopied(true);
     setTimeout(() => setDocCopied(false), 2000);
   }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -533,26 +757,76 @@ export default function TranslatePage() {
         </p>
       </div>
 
-      {/* Direction toggle */}
-      <div className="flex items-center gap-3">
-        <span className={cn("rounded-full px-3 py-1 text-sm font-medium",
-          direction === "en_to_ml" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500")}>
+      {/* Direction controls */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Auto-detect toggle (Task 3) */}
+        <button
+          onClick={toggleAutoDetect}
+          className={cn(
+            "flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium border transition-colors",
+            autoDetect
+              ? "bg-indigo-600 text-white border-indigo-600"
+              : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600"
+          )}
+          title="Let the backend detect the source language automatically"
+        >
+          <Scan className="h-3.5 w-3.5" />
+          Auto-detect
+        </button>
+
+        {/* Language pills + swap button */}
+        <span
+          className={cn(
+            "rounded-full px-3 py-1 text-sm font-medium",
+            autoDetect ? "opacity-40" : "",
+            !autoDetect && displayDirection === "en_to_ml"
+              ? "bg-indigo-100 text-indigo-700"
+              : "bg-slate-100 text-slate-500"
+          )}
+        >
           English
         </span>
         <button
           onClick={toggleDirection}
-          className="flex items-center justify-center rounded-full bg-white border border-slate-200 p-2 shadow-sm hover:bg-slate-50 transition-colors"
-          title="Swap languages"
+          disabled={autoDetect}
+          className={cn(
+            "flex items-center justify-center rounded-full bg-white border border-slate-200 p-2 shadow-sm transition-colors",
+            autoDetect
+              ? "opacity-40 cursor-not-allowed"
+              : "hover:bg-slate-50"
+          )}
+          title={
+            autoDetect
+              ? "Disable auto-detect to switch manually"
+              : "Swap languages"
+          }
         >
           <ArrowLeftRight className="h-4 w-4 text-slate-600" />
         </button>
-        <span className={cn("rounded-full px-3 py-1 text-sm font-medium",
-          direction === "ml_to_en" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500")}>
+        <span
+          className={cn(
+            "rounded-full px-3 py-1 text-sm font-medium",
+            autoDetect ? "opacity-40" : "",
+            !autoDetect && displayDirection === "ml_to_en"
+              ? "bg-indigo-100 text-indigo-700"
+              : "bg-slate-100 text-slate-500"
+          )}
+        >
           Malayalam
         </span>
-        <span className="ml-1 text-xs text-slate-400">
-          Translating: <strong className="text-slate-600">{from} → {to}</strong>
-        </span>
+
+        {autoDetect ? (
+          <span className="ml-1 text-xs text-indigo-500 font-medium">
+            Direction detected automatically from text
+          </span>
+        ) : (
+          <span className="ml-1 text-xs text-slate-400">
+            Translating:{" "}
+            <strong className="text-slate-600">
+              {from} → {to}
+            </strong>
+          </span>
+        )}
       </div>
 
       {/* Tabs */}
@@ -569,9 +843,13 @@ export default function TranslatePage() {
             )}
           >
             {tab === "text" ? (
-              <span className="flex items-center gap-1.5"><FileText className="h-4 w-4" /> Text</span>
+              <span className="flex items-center gap-1.5">
+                <FileText className="h-4 w-4" /> Text
+              </span>
             ) : (
-              <span className="flex items-center gap-1.5"><Upload className="h-4 w-4" /> Document</span>
+              <span className="flex items-center gap-1.5">
+                <Upload className="h-4 w-4" /> Document
+              </span>
             )}
           </button>
         ))}
@@ -580,60 +858,146 @@ export default function TranslatePage() {
       {/* ── Text tab ── */}
       {activeTab === "text" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Input card */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">{from} text</CardTitle>
-              <CardDescription>Paste your legal text below (max 15 000 characters)</CardDescription>
+              <CardTitle className="text-base">
+                {autoDetect ? "Source text" : `${from} text`}
+              </CardTitle>
+              <CardDescription>
+                Paste legal text · max 15,000 characters · Ctrl+Enter to translate
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <textarea
+                ref={textareaRef}
                 value={inputText}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputText(e.target.value)}
-                placeholder={`Paste ${from.toLowerCase()} legal text here…`}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  setInputText(e.target.value)
+                }
+                onKeyDown={handleTextareaKeyDown}
+                placeholder={
+                  autoDetect
+                    ? "Paste English or Malayalam legal text — direction is auto-detected…"
+                    : `Paste ${from.toLowerCase()} legal text here…`
+                }
                 className="w-full min-h-[260px] resize-y rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 placeholder:text-slate-400"
                 maxLength={15000}
               />
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400">
-                  {inputText.length.toLocaleString()} / 15,000 characters
+                {/* Live char count with colour warning (Task 7) */}
+                <span
+                  className={cn(
+                    "text-xs tabular-nums",
+                    inputText.length >= 14000
+                      ? "text-red-500 font-semibold"
+                      : inputText.length >= 12000
+                      ? "text-amber-500 font-medium"
+                      : "text-slate-400"
+                  )}
+                >
+                  {inputText.length.toLocaleString()} / 15,000
                 </span>
-                <Button onClick={handleTranslateText} disabled={!inputText.trim() || textLoading} size="sm">
-                  {textLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Translating…</> : <><Languages className="mr-2 h-4 w-4" />Translate</>}
+                <Button
+                  onClick={handleTranslateText}
+                  disabled={!inputText.trim() || textLoading}
+                  size="sm"
+                >
+                  {textLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {isStreaming ? "Streaming…" : "Translating…"}
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="mr-2 h-4 w-4" />
+                      Translate
+                    </>
+                  )}
                 </Button>
               </div>
               {textError && (
                 <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />{textError}
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  {textError}
                 </div>
               )}
             </CardContent>
           </Card>
 
+          {/* Output card */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">{to} translation</CardTitle>
-              <CardDescription>{textResult ? "Translation complete" : "Translation will appear here"}</CardDescription>
+              <CardTitle className="text-base">
+                {textResult
+                  ? `${to} translation`
+                  : autoDetect
+                  ? "Translation"
+                  : `${to} translation`}
+              </CardTitle>
+              <CardDescription>
+                {textResult
+                  ? `Complete · ${textResult.glossary_hits} glossary term${textResult.glossary_hits !== 1 ? "s" : ""} applied`
+                  : isStreaming
+                  ? "Streaming from KHC legal model…"
+                  : "Translation will appear here"}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="min-h-[260px] rounded-md border border-slate-200 bg-slate-50 p-3">
-                {textLoading ? (
-                  <div className="flex h-full min-h-[220px] items-center justify-center">
-                    <div className="text-center space-y-2 text-slate-400">
-                      <Loader2 className="h-8 w-8 animate-spin mx-auto" />
-                      <p className="text-sm">Translating with legal glossary…</p>
+                {/* Live streaming preview */}
+                {isStreaming && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-indigo-500 font-medium">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Translating with KHC glossary…
                     </div>
+                    {streamingText ? (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-500">
+                        {streamingText}
+                      </p>
+                    ) : (
+                      <div className="flex items-center justify-center min-h-[200px]">
+                        <div className="flex gap-1.5">
+                          {[0, 1, 2].map((i) => (
+                            <span
+                              key={i}
+                              className="block h-2 w-2 rounded-full bg-indigo-300 animate-bounce"
+                              style={{ animationDelay: `${i * 0.15}s` }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ) : textResult ? (
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{textResult.translated}</p>
-                ) : (
-                  <p className="text-sm text-slate-400 italic">Enter text and click Translate to see the result here.</p>
+                )}
+
+                {/* Final result with glossary highlighting */}
+                {textResult && !isStreaming && (
+                  <GlossaryHighlight
+                    text={textResult.translated}
+                    terms={textResult.glossary_terms ?? []}
+                    direction={textResult.direction as TranslateDirection}
+                  />
+                )}
+
+                {/* Empty state */}
+                {!textLoading && !textResult && !isStreaming && (
+                  <p className="text-sm text-slate-400 italic">
+                    Enter text and click Translate — or press{" "}
+                    <kbd className="rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-mono">
+                      Ctrl+Enter
+                    </kbd>{" "}
+                    — to see the result here.
+                  </p>
                 )}
               </div>
-              {textResult && (
+
+              {textResult && !isStreaming && (
                 <>
                   <ActionBar
                     translated={textResult.translated}
-                    direction={direction}
+                    direction={textResult.direction as TranslateDirection}
                     title="Legal Translation"
                     token={token}
                     onCopy={copyText}
@@ -644,6 +1008,13 @@ export default function TranslatePage() {
                     warnings={textResult.warnings}
                     charCount={textResult.char_count}
                   />
+                  {(textResult.glossary_terms ?? []).length > 0 && (
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                      <span className="inline-block w-5 border-b border-dotted border-indigo-400" />
+                      Underlined terms are glossary matches — hover to see the
+                      source.
+                    </p>
+                  )}
                 </>
               )}
             </CardContent>
@@ -657,7 +1028,9 @@ export default function TranslatePage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Upload document</CardTitle>
-              <CardDescription>Supported formats: PDF, DOCX, TXT · Max 10 MB</CardDescription>
+              <CardDescription>
+                Supported formats: PDF, DOCX, TXT · Max 10 MB
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div
@@ -666,29 +1039,60 @@ export default function TranslatePage() {
                 onClick={() => fileInputRef.current?.click()}
                 className={cn(
                   "flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors",
-                  docFile ? "border-indigo-300 bg-indigo-50" : "border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50"
+                  docFile
+                    ? "border-indigo-300 bg-indigo-50"
+                    : "border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50"
                 )}
               >
                 <Upload className="h-8 w-8 text-slate-400" />
                 {docFile ? (
                   <div className="text-center">
-                    <p className="text-sm font-medium text-indigo-700">{docFile.name}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">{formatBytes(docFile.size)}</p>
+                    <p className="text-sm font-medium text-indigo-700">
+                      {docFile.name}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {formatBytes(docFile.size)}
+                    </p>
                   </div>
                 ) : (
                   <div className="text-center">
-                    <p className="text-sm font-medium text-slate-700">Drag & drop or click to upload</p>
-                    <p className="text-xs text-slate-400 mt-0.5">PDF, DOCX, or TXT</p>
+                    <p className="text-sm font-medium text-slate-700">
+                      Drag & drop or click to upload
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      PDF, DOCX, or TXT
+                    </p>
                   </div>
                 )}
               </div>
-              <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc,.txt" className="hidden" onChange={handleFileChange} />
-              <Button onClick={handleTranslateDoc} disabled={!docFile || docLoading} className="w-full">
-                {docLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Translating document…</> : <><Languages className="mr-2 h-4 w-4" />Translate document ({from} → {to})</>}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.txt"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <Button
+                onClick={handleTranslateDoc}
+                disabled={!docFile || docLoading}
+                className="w-full"
+              >
+                {docLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Translating document…
+                  </>
+                ) : (
+                  <>
+                    <Languages className="mr-2 h-4 w-4" />
+                    Translate document ({from} → {to})
+                  </>
+                )}
               </Button>
               {docError && (
                 <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />{docError}
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  {docError}
                 </div>
               )}
             </CardContent>
@@ -710,13 +1114,19 @@ export default function TranslatePage() {
                     <div className="text-center space-y-2 text-slate-400">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto" />
                       <p className="text-sm">Translating document chunks…</p>
-                      <p className="text-xs">Large documents may take a moment</p>
+                      <p className="text-xs">
+                        Large documents may take a moment
+                      </p>
                     </div>
                   </div>
                 ) : docResult ? (
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{docResult.translated}</p>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                    {docResult.translated}
+                  </p>
                 ) : (
-                  <p className="text-sm text-slate-400 italic">Translated text will appear here.</p>
+                  <p className="text-sm text-slate-400 italic">
+                    Translated text will appear here.
+                  </p>
                 )}
               </div>
               {docResult && (
@@ -724,7 +1134,10 @@ export default function TranslatePage() {
                   <ActionBar
                     translated={docResult.translated}
                     direction={direction}
-                    title={docResult.filename.replace(/\.[^.]+$/, "") || "Document Translation"}
+                    title={
+                      docResult.filename.replace(/\.[^.]+$/, "") ||
+                      "Document Translation"
+                    }
                     token={token}
                     onCopy={copyDoc}
                     copied={docCopied}
@@ -747,9 +1160,14 @@ export default function TranslatePage() {
         <BookOpen className="h-4 w-4 shrink-0 text-indigo-400 mt-0.5" />
         <p>
           The translator uses a built-in legal glossary of{" "}
-          <strong>1000+ English–Malayalam terms</strong> to ensure consistent translation of legal vocabulary.
-          Case numbers, section references, act names, dates, and Latin phrases are automatically preserved
-          verbatim and never altered by the AI model.
+          <strong>6,000+ English–Malayalam terms</strong> with deterministic
+          placeholder protection. Case numbers, section references, act names,
+          dates, and Latin phrases are locked before translation and restored
+          verbatim afterwards. Glossary matches are{" "}
+          <span className="border-b border-dotted border-indigo-400 text-indigo-600">
+            underlined
+          </span>{" "}
+          in the output — hover to see the source term.
         </p>
       </div>
     </div>

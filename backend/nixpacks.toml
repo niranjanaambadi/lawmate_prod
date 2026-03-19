@@ -1,2 +1,2 @@
 [phases.setup]
-nixPkgs = ["tesseract", "tesseract-traineddata-eng", "poppler_utils", "python311"]
+nixPkgs = ["tesseract", "poppler_utils", "python311"]
