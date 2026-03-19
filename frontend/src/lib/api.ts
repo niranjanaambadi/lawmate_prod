@@ -1740,6 +1740,26 @@ export async function getLegalInsightResult(
   });
 }
 
+export async function streamJudgmentChat(
+  jobId: string,
+  messages: { role: "user" | "assistant"; content: string }[],
+  token: string
+): Promise<Response> {
+  const res = await fetch(`${getBaseUrl()}/api/v1/legal-insight/jobs/${jobId}/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ messages }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(msg || `Chat request failed (${res.status})`);
+  }
+  return res;
+}
+
 // ── Case Prep AI ─────────────────────────────────────────────────────────────
 
 export type PrepMode =

@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
+  ArrowLeft,
   BookOpen,
   Loader2,
   AlertCircle,
   CheckCircle2,
   FileText,
   ChevronDown,
+  MessageSquare,
+  Send,
   Upload,
   X,
 } from "lucide-react";
@@ -20,6 +23,7 @@ import {
   uploadLegalInsightPdf,
   getLegalInsightJob,
   getLegalInsightResult,
+  streamJudgmentChat,
   CaseListItem,
   DocumentListItem,
   LegalInsightJob,
@@ -54,6 +58,11 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"];
 
 const POLL_INTERVAL_MS = 2000;
+
+type ChatMsg = { role: "user" | "assistant"; content: string };
+const INITIAL_CHAT: ChatMsg[] = [
+  { role: "assistant", content: "Want to understand the judgement better? Ask me anything about it." },
+];
 
 // ── SummaryItemCard ──────────────────────────────────────────────────────────
 
@@ -206,6 +215,13 @@ export default function LegalInsightPage() {
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Chat state ────────────────────────────────────────────────────────────
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>(INITIAL_CHAT);
+  const [chatInput, setChatInput] = useState("");
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   // ── Load cases on mount ────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -345,6 +361,57 @@ export default function LegalInsightPage() {
     setError(null);
   }, [uploadedPdfUrl]);
 
+  // ── Drag-and-drop ─────────────────────────────────────────────────────────
+
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      dragCounterRef.current = 0;
+
+      const file = e.dataTransfer.files?.[0] ?? null;
+      if (!file || file.type !== "application/pdf") {
+        setError("Only PDF files are supported.");
+        return;
+      }
+      if (uploadedPdfUrl) URL.revokeObjectURL(uploadedPdfUrl);
+      setUploadedFile(file);
+      setUploadedPdfUrl(URL.createObjectURL(file));
+      setJob(null);
+      setResult(null);
+      setError(null);
+      setActivePage(undefined);
+      setActiveCitation(null);
+      setActiveCitationId(null);
+    },
+    [uploadedPdfUrl]
+  );
+
   // ── Poll job status ───────────────────────────────────────────────────────
 
   const startPolling = useCallback(
@@ -396,6 +463,9 @@ export default function LegalInsightPage() {
     setActiveCitation(null);
     setActiveCitationId(null);
     setAnalyzeLoading(true);
+    setChatOpen(false);
+    setChatMessages(INITIAL_CHAT);
+    setChatInput("");
 
     try {
       const newJob =
@@ -417,6 +487,86 @@ export default function LegalInsightPage() {
       setAnalyzeLoading(false);
     }
   }, [inputMode, selectedDocumentId, uploadedFile, token, stopPolling, startPolling]);
+
+  // ── Chat handlers ─────────────────────────────────────────────────────────
+
+  const handleSendChat = useCallback(async () => {
+    if (!chatInput.trim() || chatStreaming || !job?.job_id || !token) return;
+
+    const userMsg: ChatMsg = { role: "user", content: chatInput.trim() };
+    const history = [...chatMessages, userMsg];
+    setChatMessages([...history, { role: "assistant", content: "" }]);
+    setChatInput("");
+    setChatStreaming(true);
+
+    try {
+      const res = await streamJudgmentChat(job.job_id, history, token);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) {
+              setChatMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: "assistant",
+                  content: updated[updated.length - 1].content + parsed.text,
+                };
+                return updated;
+              });
+              chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }
+            if (parsed.error) {
+              setChatMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: "assistant",
+                  content: "Sorry, something went wrong. Please try again.",
+                };
+                return updated;
+              });
+            }
+          } catch {
+            // ignore malformed SSE line
+          }
+        }
+      }
+    } catch {
+      setChatMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: "Sorry, something went wrong. Please try again.",
+        };
+        return updated;
+      });
+    } finally {
+      setChatStreaming(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    }
+  }, [chatInput, chatStreaming, chatMessages, job, token]);
+
+  const handleChatKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        handleSendChat();
+      }
+    },
+    [handleSendChat]
+  );
 
   // ── Citation click handler ────────────────────────────────────────────────
 
@@ -476,7 +626,7 @@ export default function LegalInsightPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
       {/* ── Left panel ────────────────────────────────────────────────────── */}
-      <div className="flex w-[420px] shrink-0 flex-col border-r border-slate-200 bg-white overflow-y-auto">
+      <div className="relative flex w-[420px] shrink-0 flex-col border-r border-slate-200 bg-white overflow-y-auto">
         {/* Header */}
         <div className="border-b border-slate-200 p-4">
           <div className="flex items-center gap-2 mb-1">
@@ -585,32 +735,53 @@ export default function LegalInsightPage() {
             </>
           ) : (
             /* Upload mode */
-            <div>
+            <div
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+            >
               <label className="block text-xs font-medium text-slate-500 mb-1">
                 Judgment PDF
               </label>
               {uploadedFile ? (
-                <div className="flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm">
+                <div
+                  className={cn(
+                    "flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
+                    isDragging
+                      ? "border-indigo-400 bg-indigo-100"
+                      : "border-indigo-200 bg-indigo-50"
+                  )}
+                >
                   <FileText className="h-4 w-4 text-indigo-600 shrink-0" />
                   <span className="flex-1 truncate text-slate-700 text-xs">
-                    {uploadedFile.name}
+                    {isDragging ? "Drop to replace…" : uploadedFile.name}
                   </span>
-                  <button
-                    onClick={handleClearUpload}
-                    className="shrink-0 text-slate-400 hover:text-red-500 transition-colors"
-                    title="Remove file"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+                  {!isDragging && (
+                    <button
+                      onClick={handleClearUpload}
+                      className="shrink-0 text-slate-400 hover:text-red-500 transition-colors"
+                      title="Remove file"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex flex-col items-center justify-center gap-1.5 rounded-md border-2 border-dashed border-slate-200 bg-white px-4 py-5 text-slate-400 hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
+                  className={cn(
+                    "w-full flex flex-col items-center justify-center gap-1.5 rounded-md border-2 border-dashed px-4 py-5 transition-colors cursor-pointer",
+                    isDragging
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-600 scale-[1.01]"
+                      : "border-slate-200 bg-white text-slate-400 hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-600"
+                  )}
                 >
-                  <Upload className="h-5 w-5" />
-                  <span className="text-xs font-medium">Click to select PDF</span>
+                  <Upload className={cn("h-5 w-5", isDragging && "animate-bounce")} />
+                  <span className="text-xs font-medium">
+                    {isDragging ? "Drop PDF here" : "Click or drag PDF here"}
+                  </span>
                   <span className="text-[11px]">Kerala HC · Supreme Court judgments</span>
                 </button>
               )}
@@ -647,6 +818,17 @@ export default function LegalInsightPage() {
               </>
             )}
           </button>
+
+          {/* Chat for Insights button — visible only when analysis is complete */}
+          {result && (
+            <button
+              onClick={() => setChatOpen(true)}
+              className="w-full flex items-center justify-center gap-2 rounded-md border border-indigo-300 px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Chat for Insights
+            </button>
+          )}
 
           {/* Error message */}
           {error && (
@@ -729,6 +911,76 @@ export default function LegalInsightPage() {
               <span className="font-medium text-slate-600">Analyze Judgment</span> to get
               an AI-powered structured summary with clickable citations.
             </p>
+          </div>
+        )}
+        {/* ── Chat overlay ──────────────────────────────────────────────── */}
+        {chatOpen && (
+          <div className="absolute inset-0 z-20 flex flex-col bg-white">
+            {/* Header */}
+            <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3 shrink-0">
+              <button
+                onClick={() => setChatOpen(false)}
+                className="text-slate-400 hover:text-slate-700 transition-colors"
+                title="Back to analysis"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <MessageSquare className="h-4 w-4 text-indigo-600" />
+              <span className="text-sm font-semibold text-slate-800">Judgment Chat</span>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {chatMessages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={cn(
+                    "max-w-[88%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
+                    msg.role === "user"
+                      ? "ml-auto bg-indigo-600 text-white"
+                      : "mr-auto bg-slate-100 text-slate-800"
+                  )}
+                >
+                  {msg.content || (
+                    <span className="flex items-center gap-1.5 text-slate-400 text-xs">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Thinking…
+                    </span>
+                  )}
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Input bar */}
+            <div className="shrink-0 border-t border-slate-200 p-3 flex gap-2 items-end">
+              <textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={handleChatKeyDown}
+                placeholder="Ask about this judgment…"
+                rows={2}
+                disabled={chatStreaming}
+                className="flex-1 resize-none rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+              />
+              <button
+                onClick={handleSendChat}
+                disabled={chatStreaming || !chatInput.trim()}
+                title="Send (Ctrl+Enter)"
+                className={cn(
+                  "shrink-0 flex items-center justify-center rounded-md p-2 transition-colors",
+                  chatStreaming || !chatInput.trim()
+                    ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                    : "bg-indigo-600 text-white hover:bg-indigo-700"
+                )}
+              >
+                {chatStreaming ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </div>
         )}
       </div>

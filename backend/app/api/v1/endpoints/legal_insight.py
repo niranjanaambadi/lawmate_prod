@@ -5,14 +5,18 @@ POST   /legal-insight/jobs                    → create job from existing docum
 POST   /legal-insight/jobs/upload             → create job from uploaded PDF file (queued)
 GET    /legal-insight/jobs/{job_id}           → status + progress
 GET    /legal-insight/jobs/{job_id}/result    → summary + citation_map
+POST   /legal-insight/jobs/{job_id}/chat      → streaming chat about the judgment (SSE)
 """
 
 from __future__ import annotations
 
+import json
 import uuid as uuid_lib
+from typing import AsyncGenerator, Literal
 
 import boto3
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,8 +24,9 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.logger import logger
 from app.db.database import get_db
-from app.db.models import LegalInsightJob, LegalInsightJobStatus, LegalInsightResult, User
+from app.db.models import LegalInsightChunk, LegalInsightJob, LegalInsightJobStatus, LegalInsightResult, User
 from app.services.legal_insight_job_service import legal_insight_job_service
+from app.services.legal_insight_llm_service import legal_insight_llm_service
 
 router = APIRouter()
 
@@ -237,3 +242,88 @@ def get_job_result(
         )
 
     return result.result_json
+
+
+# ============================================================================
+# Chat endpoint
+# ============================================================================
+
+
+class ChatMessageSchema(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessageSchema]
+
+
+@router.post(
+    "/jobs/{job_id}/chat",
+    summary="Chat with the judgment",
+    description=(
+        "Stream an AI response to a user question about a completed judgment analysis. "
+        "Returns SSE (text/event-stream) with JSON delta chunks and a final [DONE] sentinel."
+    ),
+)
+async def chat_with_judgment(
+    job_id: str,
+    body: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Stream a chat response grounded in the judgment's extracted text and structured summary."""
+
+    # ── Auth + job validation ─────────────────────────────────────────────────
+    job: LegalInsightJob | None = (
+        db.query(LegalInsightJob).filter(LegalInsightJob.id == job_id).first()
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if str(job.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="You do not have permission to access this job")
+    if job.status != LegalInsightJobStatus.completed:
+        raise HTTPException(status_code=409, detail="Job not yet completed — analysis must finish before chatting")
+
+    result: LegalInsightResult | None = (
+        db.query(LegalInsightResult).filter(LegalInsightResult.job_id == str(job.id)).first()
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Result record not found for this job")
+
+    # ── Fetch and sample chunks ───────────────────────────────────────────────
+    db_chunks = (
+        db.query(LegalInsightChunk)
+        .filter(LegalInsightChunk.job_id == str(job.id))
+        .order_by(LegalInsightChunk.page_number)
+        .all()
+    )
+    chunk_dicts = [
+        {"chunk_id": c.chunk_id, "page_number": c.page_number, "text": c.text}
+        for c in db_chunks
+    ]
+
+    # Convert messages for the service
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+
+    result_json = result.result_json or {}
+
+    # ── SSE generator ─────────────────────────────────────────────────────────
+    async def generate() -> AsyncGenerator[str, None]:
+        try:
+            for text_delta in legal_insight_llm_service.stream_chat(result_json, chunk_dicts, messages):
+                yield f"data: {json.dumps({'text': text_delta})}\n\n"
+        except Exception as exc:
+            logger.exception("chat_with_judgment stream error: %s", exc)
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )

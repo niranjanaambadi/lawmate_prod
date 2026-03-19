@@ -65,6 +65,42 @@ const DAYS    = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS  = ["January","February","March","April","May","June",
                  "July","August","September","October","November","December"];
 
+// ── Kerala High Court holidays (from official HC Calendar 2026) ──────────────
+
+interface HCHoliday { date: string; name: string; type: "public" | "non_sitting" }
+
+const HC_HOLIDAYS: HCHoliday[] = [
+  { date: "2026-01-01", name: "New Year (HC Holiday)",                              type: "public" },
+  { date: "2026-01-02", name: "Mannam Jayanthi",                                    type: "public" },
+  { date: "2026-01-26", name: "Republic Day",                                       type: "public" },
+  { date: "2026-03-20", name: "Id-ul-Fitr (Ramzan)",                                type: "public" },
+  { date: "2026-04-02", name: "Maundy Thursday",                                    type: "public" },
+  { date: "2026-04-03", name: "Good Friday",                                        type: "public" },
+  { date: "2026-04-14", name: "Dr. B.R. Ambedkar Jayanthi",                        type: "public" },
+  { date: "2026-04-15", name: "Vishu",                                              type: "public" },
+  { date: "2026-05-01", name: "May Day",                                            type: "public" },
+  { date: "2026-05-27", name: "Id-ul-Ad'ha (Bakrid)",                              type: "public" },
+  { date: "2026-06-25", name: "Muharram",                                           type: "public" },
+  { date: "2026-06-26", name: "Non-Sitting Day (HC only)",                         type: "non_sitting" },
+  { date: "2026-08-12", name: "Karkkadaka Vavu",                                   type: "public" },
+  { date: "2026-08-15", name: "Independence Day",                                   type: "public" },
+  { date: "2026-08-25", name: "First Onam / Milad-i-Sherif",                       type: "public" },
+  { date: "2026-08-26", name: "Thiruvonam",                                         type: "public" },
+  { date: "2026-08-27", name: "Third Onam",                                         type: "public" },
+  { date: "2026-08-28", name: "Fourth Onam / Sree Narayana Guru Jayanthi",         type: "public" },
+  { date: "2026-09-04", name: "Sreekrishna Jayanthi",                              type: "public" },
+  { date: "2026-09-21", name: "Sree Narayana Guru Samadhi",                        type: "public" },
+  { date: "2026-10-02", name: "Gandhi Jayanthi",                                   type: "public" },
+  { date: "2026-10-19", name: "Non-Sitting Day (HC only)",                         type: "non_sitting" },
+  { date: "2026-10-20", name: "Mahanavami",                                        type: "public" },
+  { date: "2026-10-21", name: "Vijayadasami",                                      type: "public" },
+  { date: "2026-11-09", name: "Non-Sitting Day (HC only)",                         type: "non_sitting" },
+  { date: "2026-12-25", name: "Christmas",                                         type: "public" },
+];
+
+// O(1) lookup: date string → HCHoliday
+const HC_HOLIDAY_MAP = new Map<string, HCHoliday>(HC_HOLIDAYS.map(h => [h.date, h]));
+
 const EVENT_COLORS: Record<string, string> = {
   hearing:  "#b45309",   // amber-700
   deadline: "#dc2626",   // red-600
@@ -488,6 +524,41 @@ export default function CalendarPage() {
           display: inline-block;
           margin-right: 5px;
         }
+        /* ── Holiday / Sunday red styling ── */
+        .cal-grid-cell.red-day { background: #fff5f5; }
+        .cal-grid-cell.red-day:hover { background: #fee2e2; }
+        .cal-grid-cell.red-day.selected { background: #fef3c7; }
+        .cal-grid-cell.red-day .day-num { color: #dc2626; font-weight: 600; }
+        .cal-grid-cell.red-day.today .day-num {
+          background: #dc2626;
+          color: #fff;
+          border-radius: 50%;
+        }
+        .cal-grid-cell.red-day.dimmed { background: #fff9f9; }
+        .cal-grid-cell.red-day.dimmed .day-num { color: #f87171; }
+        .holiday-label {
+          font-size: 9px;
+          color: #dc2626;
+          font-weight: 500;
+          line-height: 1.2;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 100%;
+          margin-top: 1px;
+          opacity: 0.9;
+        }
+        .non-sitting-label {
+          font-size: 9px;
+          color: #7c3aed;
+          font-weight: 500;
+          line-height: 1.2;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 100%;
+          margin-top: 1px;
+        }
       `}</style>
 
       <div className="cal-root">
@@ -556,7 +627,7 @@ export default function CalendarPage() {
               {/* Day headers */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", background: "#f5f3ef" }}>
                 {DAYS.map(d => (
-                  <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 11, fontWeight: 600, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                  <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 11, fontWeight: 600, color: d === "Sun" ? "#dc2626" : "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                     {d}
                   </div>
                 ))}
@@ -570,15 +641,31 @@ export default function CalendarPage() {
                   {cells.map((cell) => {
                     const dayEvents = eventsByDate[cell.date] || [];
                     const isSelected = cell.date === selectedDate;
+                    const cellDate = new Date(cell.date + "T00:00:00");
+                    const isSunday = cellDate.getDay() === 0;
+                    const holiday = HC_HOLIDAY_MAP.get(cell.date);
+                    const isRedDay = isSunday || !!holiday;
                     return (
                       <div
                         key={cell.date}
-                        className={`cal-grid-cell ${!cell.isCurrentMonth ? "dimmed" : ""} ${cell.isToday ? "today" : ""} ${isSelected ? "selected" : ""}`}
+                        className={[
+                          "cal-grid-cell",
+                          !cell.isCurrentMonth ? "dimmed" : "",
+                          cell.isToday ? "today" : "",
+                          isSelected ? "selected" : "",
+                          isRedDay ? "red-day" : "",
+                        ].filter(Boolean).join(" ")}
                         onClick={() => setSelectedDate(cell.date)}
                       >
                         <div className="day-num">
                           {parseInt(cell.date.slice(8))}
                         </div>
+                        {/* Holiday name label */}
+                        {holiday && cell.isCurrentMonth && (
+                          <div className={holiday.type === "non_sitting" ? "non-sitting-label" : "holiday-label"} title={holiday.name}>
+                            {holiday.name}
+                          </div>
+                        )}
                         {/* Show up to 2 event pills, rest as count */}
                         {dayEvents.slice(0, 2).map(e => (
                           <div
@@ -609,6 +696,14 @@ export default function CalendarPage() {
                     {label}
                   </span>
                 ))}
+                <span style={{ display: "flex", alignItems: "center", fontSize: 11, color: "#64748b", marginLeft: 4, paddingLeft: 12, borderLeft: "1px solid #e8e4dc" }}>
+                  <span className="legend-dot" style={{ background: "#dc2626" }} />
+                  Holiday / Sunday
+                </span>
+                <span style={{ display: "flex", alignItems: "center", fontSize: 11, color: "#64748b" }}>
+                  <span className="legend-dot" style={{ background: "#7c3aed" }} />
+                  HC Non-Sitting Day
+                </span>
               </div>
             </div>
 
@@ -624,6 +719,43 @@ export default function CalendarPage() {
                   {new Date(selectedDate + "T12:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
                 </p>
               </div>
+
+              {/* Holiday / Sunday banner for selected day */}
+              {(() => {
+                const sd = new Date(selectedDate + "T00:00:00");
+                const selHoliday = HC_HOLIDAY_MAP.get(selectedDate);
+                const selIsSunday = sd.getDay() === 0;
+                if (selHoliday) {
+                  return (
+                    <div style={{
+                      margin: "10px 18px 0",
+                      padding: "8px 12px",
+                      borderRadius: 6,
+                      background: selHoliday.type === "non_sitting" ? "#f5f3ff" : "#fff5f5",
+                      border: `1px solid ${selHoliday.type === "non_sitting" ? "#ddd6fe" : "#fecaca"}`,
+                      display: "flex", alignItems: "center", gap: 7,
+                    }}>
+                      <span style={{ fontSize: 14 }}>{selHoliday.type === "non_sitting" ? "🏛" : "🎌"}</span>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: selHoliday.type === "non_sitting" ? "#6d28d9" : "#dc2626" }}>
+                          {selHoliday.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1 }}>
+                          {selHoliday.type === "non_sitting" ? "HC Non-Sitting Day" : "Public Holiday — High Court Closed"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                if (selIsSunday) {
+                  return (
+                    <div style={{ margin: "10px 18px 0", padding: "7px 12px", borderRadius: 6, background: "#fff5f5", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>🔴</span> Sunday — Court Holiday
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {/* Events for selected day */}
               <div style={{ padding: "4px 18px 12px", maxHeight: 420, overflowY: "auto" }}>
@@ -723,6 +855,61 @@ export default function CalendarPage() {
               )}
             </div>
           </div>
+
+          {/* ── HC Public Holidays List ── */}
+          <div style={{ marginTop: 28, background: "#fff", borderRadius: 12, border: "1px solid #e8e4dc", boxShadow: "0 1px 8px rgba(0,0,0,0.04)", overflow: "hidden" }}>
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid #e8e4dc", background: "#faf9f6", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block", flexShrink: 0 }} />
+              <span className="cal-header-title" style={{ fontSize: 17, color: "#1e293b" }}>
+                Kerala High Court — Public Holidays 2026
+              </span>
+              <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8" }}>
+                Source: HC Calendar 2026
+              </span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
+              {HC_HOLIDAYS.map((h, i) => {
+                const d = new Date(h.date + "T00:00:00");
+                const dayName = d.toLocaleDateString("en-IN", { weekday: "long" });
+                const isLast = i === HC_HOLIDAYS.length - 1;
+                return (
+                  <div
+                    key={h.date}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      padding: "11px 20px",
+                      borderBottom: isLast ? "none" : "1px solid #f1ede6",
+                      borderRight: "1px solid #f1ede6",
+                    }}
+                  >
+                    {/* Date badge */}
+                    <div style={{ width: 42, flexShrink: 0, textAlign: "center" }}>
+                      <div className="cal-month-label" style={{ fontSize: 20, fontWeight: 600, color: h.type === "non_sitting" ? "#7c3aed" : "#dc2626", lineHeight: 1 }}>
+                        {d.getDate()}
+                      </div>
+                      <div style={{ fontSize: 9, fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 1 }}>
+                        {d.toLocaleDateString("en-IN", { month: "short" })}
+                      </div>
+                    </div>
+                    {/* Name + day */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#1e293b", lineHeight: 1.3 }}>{h.name}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{dayName}</div>
+                    </div>
+                    {/* HC-only badge */}
+                    {h.type === "non_sitting" && (
+                      <span style={{ fontSize: 9, color: "#7c3aed", background: "#f5f3ff", padding: "2px 7px", borderRadius: 3, fontWeight: 600, letterSpacing: "0.04em", flexShrink: 0 }}>
+                        HC ONLY
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
         </div>
       </div>
 

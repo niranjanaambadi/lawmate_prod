@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Callable, Optional
+from typing import Callable, Generator, Optional
 
 import boto3
 from botocore.config import Config
@@ -375,6 +375,122 @@ class LegalInsightLlmService:
 
         _progress(100)
         return final
+
+
+    # ------------------------------------------------------------------
+    # Judgment chat (streaming)
+    # ------------------------------------------------------------------
+
+    _CHAT_SYSTEM_TEMPLATE = """\
+You are a legal AI assistant specialising in Indian court judgments (Kerala High Court, Supreme Court of India).
+You have been provided with two sources of information about a specific judgment:
+  1. A structured AI-generated analysis (facts, issues, arguments, ratio decidendi, final order).
+  2. Sampled extracted text from the judgment itself, with page numbers.
+
+Your role: answer the user's questions accurately and only from this material.
+Rules:
+- Cite page numbers when referencing specific content (e.g., "See page 42").
+- If the information is not present in the provided material, say so explicitly — never guess.
+- Never hallucinate case names, statutes, citations, or facts.
+- Be concise but thorough; use plain language the user can understand.
+- Format lists with bullet points when helpful.
+
+=== STRUCTURED ANALYSIS ===
+{analysis}
+
+=== EXTRACTED JUDGMENT TEXT (representative sample) ===
+{chunks}"""
+
+    @staticmethod
+    def _format_analysis(result_json: dict) -> str:
+        """Convert result_json summary into a readable text block."""
+        section_labels = {
+            "facts": "FACTS",
+            "issues": "ISSUES",
+            "arguments": "ARGUMENTS",
+            "ratio": "RATIO DECIDENDI",
+            "final_order": "FINAL ORDER",
+        }
+        parts: list[str] = []
+        for key, label in section_labels.items():
+            items = result_json.get("summary", result_json).get(key, [])
+            if not items:
+                continue
+            parts.append(f"--- {label} ---")
+            for item in items:
+                if isinstance(item, dict):
+                    parts.append(f"• {item.get('text', '')}")
+        return "\n".join(parts) if parts else "(No structured analysis available)"
+
+    @staticmethod
+    def _sample_chunks(chunks: list[dict], max_chunks: int = 150) -> list[dict]:
+        """Evenly sample chunks down to max_chunks to fit in the context window."""
+        if len(chunks) <= max_chunks:
+            return chunks
+        step = len(chunks) / max_chunks
+        return [chunks[int(i * step)] for i in range(max_chunks)]
+
+    def stream_chat(
+        self,
+        result_json: dict,
+        chunks: list[dict],
+        messages: list[dict],
+    ) -> Generator[str, None, None]:
+        """
+        Stream a chat response about the judgment.
+
+        *result_json* is the LegalInsightResult.result_json dict.
+        *chunks* is a list of dicts with keys: chunk_id, page_number, text.
+        *messages* is the conversation history: [{"role": "user"|"assistant", "content": str}].
+
+        Yields raw text delta strings as they arrive from Bedrock.
+        """
+        # ── Build context ─────────────────────────────────────────────────
+        sampled = self._sample_chunks(chunks, max_chunks=150)
+        chunk_text = "\n\n".join(
+            f"[Page {c['page_number']}] {c['text'][:600]}" for c in sampled
+        )
+        analysis_text = self._format_analysis(result_json)
+
+        system_prompt = self._CHAT_SYSTEM_TEMPLATE.format(
+            analysis=analysis_text,
+            chunks=chunk_text or "(No raw text available)",
+        )
+
+        # ── Convert message history to Converse API format ────────────────
+        bedrock_messages: list[dict] = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role not in ("user", "assistant"):
+                continue
+            bedrock_messages.append(
+                {"role": role, "content": [{"text": content}]}
+            )
+
+        # Bedrock requires conversation to start with a user turn
+        if not bedrock_messages or bedrock_messages[0]["role"] != "user":
+            return
+
+        # ── Stream via converse_stream ────────────────────────────────────
+        logger.info(
+            "stream_chat: %d history msgs, %d sampled chunks, model=%s",
+            len(bedrock_messages),
+            len(sampled),
+            self.model,
+        )
+        response = self.client.converse_stream(
+            modelId=self.model,
+            system=[{"text": system_prompt}],
+            messages=bedrock_messages,
+            inferenceConfig={"maxTokens": 2048, "temperature": 0.3},
+        )
+        for event in response["stream"]:
+            if "contentBlockDelta" in event:
+                delta = event["contentBlockDelta"].get("delta", {})
+                text = delta.get("text", "")
+                if text:
+                    yield text
 
 
 # Singleton
