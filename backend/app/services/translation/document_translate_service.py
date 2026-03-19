@@ -22,18 +22,101 @@ _OVERLAP_CHARS = 100  # slight overlap to keep sentence context at boundaries
 
 
 def _extract_pdf(data: bytes) -> str:
-    """Extract plain text from a PDF byte blob."""
+    """
+    Extract plain text from a PDF byte blob.
+
+    Strategy:
+      1. Try pypdf native text extraction.
+      2. If the result is sparse (< 200 avg chars/page) — i.e. the PDF is
+         scanned or image-based — fall back to Tesseract OCR.
+    """
+    text, page_count, was_ocr = _extract_pdf_with_threshold(
+        data, min_chars_per_page=200
+    )
+    if was_ocr:
+        logger.info(
+            "_extract_pdf: OCR used on %d-page PDF (sparse native text)", page_count
+        )
+    else:
+        logger.debug(
+            "_extract_pdf: native pypdf OK (%d pages)", page_count
+        )
+    return text
+
+
+def _extract_pdf_with_threshold(data: bytes, min_chars_per_page: int = 200) -> tuple:
+    """
+    Internal helper: pypdf native → OCR fallback at *min_chars_per_page* threshold.
+    Returns (text, page_count, was_ocr_used).
+    """
+    import io as _io
+
+    # ── 1. pypdf native ────────────────────────────────────────────────────
     try:
         import pypdf  # type: ignore
-    except ImportError:
-        raise RuntimeError("pypdf is required for PDF extraction (pip install pypdf)")
 
-    reader = pypdf.PdfReader(BytesIO(data))
-    pages: List[str] = []
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        pages.append(text)
-    return "\n\n".join(pages)
+        reader = pypdf.PdfReader(_io.BytesIO(data))
+        page_count = len(reader.pages)
+        pages_text: List[str] = []
+        for page in reader.pages:
+            try:
+                pages_text.append(page.extract_text() or "")
+            except Exception:
+                pages_text.append("")
+
+        native_text = "\n\n".join(pages_text).strip()
+        avg_chars = len(native_text) / max(page_count, 1)
+
+        if avg_chars >= min_chars_per_page:
+            return native_text, page_count, False
+
+        logger.info(
+            "_extract_pdf_with_threshold: sparse native text "
+            "(%.0f avg chars/page < %d threshold) → trying OCR",
+            avg_chars, min_chars_per_page,
+        )
+
+    except Exception as exc:
+        logger.warning(
+            "_extract_pdf_with_threshold: pypdf failed (%s) → trying OCR", exc
+        )
+        page_count = 0
+        native_text = ""
+
+    # ── 2. OCR fallback ────────────────────────────────────────────────────
+    try:
+        import pytesseract  # type: ignore
+        from pdf2image import convert_from_bytes  # type: ignore
+        from PIL import Image  # type: ignore
+
+        images: List[Image.Image] = convert_from_bytes(data, dpi=200, fmt="jpeg")
+        if page_count == 0:
+            page_count = len(images)
+
+        ocr_pages: List[str] = []
+        for img in images:
+            try:
+                ocr_pages.append(pytesseract.image_to_string(img, lang="eng"))
+            except Exception as ocr_exc:
+                logger.debug("_extract_pdf OCR page failed: %s", ocr_exc)
+                ocr_pages.append("")
+
+        ocr_text = "\n\n".join(ocr_pages).strip()
+        logger.info(
+            "_extract_pdf_with_threshold: OCR produced %d chars from %d pages",
+            len(ocr_text), len(images),
+        )
+        return ocr_text, page_count, True
+
+    except Exception as exc:
+        logger.error("_extract_pdf_with_threshold: OCR fallback failed: %s", exc)
+
+    # ── 3. Hard failure ────────────────────────────────────────────────────
+    placeholder = (
+        "[Text extraction failed — the PDF appears to be image-only and OCR "
+        "could not process it. Please upload a native PDF or a TXT file.]"
+    )
+    return placeholder, max(page_count, 0), True
 
 
 def _extract_docx(data: bytes) -> str:

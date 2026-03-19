@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Dict, Generator, List, Literal, Union
 
 import boto3
@@ -159,6 +160,27 @@ def _validate_glossary_placeholders(
     return [ph for ph in term_map if ph not in translated]
 
 
+# Matches any LLM preamble the model adds before the actual translation,
+# e.g. "Here is the formal English translation of the Malayalam legal text:"
+# or "Translation:" or "Here is the Malayalam translation:\n\n"
+_PREAMBLE_RE = re.compile(
+    r"^(?:"
+    r"here\s+is\s+(?:the\s+)?(?:formal\s+)?(?:\w+\s+)*translation[^:\n]*[:\-]\s*"
+    r"|translation[:\-]\s*"
+    r"|(?:formal\s+)?(?:english|malayalam)\s+translation[^:\n]*[:\-]\s*"
+    r")\n*",
+    re.IGNORECASE,
+)
+
+
+def _strip_preamble(text: str) -> str:
+    """Remove boilerplate preamble lines the LLM sometimes prepends."""
+    stripped = _PREAMBLE_RE.sub("", text.lstrip())
+    if stripped != text:
+        logger.debug("_strip_preamble: removed LLM preamble from translation output")
+    return stripped
+
+
 # ── Service ───────────────────────────────────────────────────────────────
 
 class LLMTranslateService:
@@ -193,7 +215,8 @@ class LLMTranslateService:
                 "maxTokens": max_tokens,
             },
         )
-        return response["output"]["message"]["content"][0]["text"].strip()
+        raw = response["output"]["message"]["content"][0]["text"].strip()
+        return _strip_preamble(raw)
 
     def _translate_with_retry(
         self,
@@ -415,6 +438,9 @@ class LLMTranslateService:
                     if chunk_text:
                         full_translated += chunk_text
                         yield chunk_text   # raw chunk — client shows as live preview
+
+        # Strip any preamble the model emitted at the start of the stream
+        full_translated = _strip_preamble(full_translated)
 
         # 5. Validate glossary placeholders; retry synchronously if needed
         if term_map:

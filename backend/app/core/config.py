@@ -178,8 +178,8 @@ class Settings(BaseSettings):
         return [x.strip() for x in raw.split(",") if x.strip()]
 
     # Legal translation
-    LEGAL_TRANSLATE_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
-    LEGAL_TRANSLATE_MAX_TOKENS: int = 4096
+    LEGAL_TRANSLATE_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"  # lawmate-fast (Claude Haiku 4.5)
+    LEGAL_TRANSLATE_MAX_TOKENS: int = 8192   # Haiku 4.5 supports larger output windows
     LEGAL_TRANSLATE_TEMPERATURE: float = 0.1
     LEGAL_TRANSLATE_MAX_SUBSET_TERMS: int = 30
     LEGAL_GLOSSARY_PATH: str = ""  # leave blank to auto-resolve from backend root
