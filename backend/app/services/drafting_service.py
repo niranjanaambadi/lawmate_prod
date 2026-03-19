@@ -314,7 +314,7 @@ async def upload_document(
     token_estimate = estimate_tokens(extracted_text)
 
     # ── Classify document type ────────────────────────────────────────────────
-    doc_type = await _classify_doc_type(extracted_text[:2000])
+    doc_type = await _classify_doc_type(extracted_text[:2000], filename=filename)
 
     # ── Decide strategy ───────────────────────────────────────────────────────
     # Will be re-evaluated at chat time across all docs; stored per-doc here.
@@ -956,10 +956,10 @@ def _format_case_context(ctx: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
-async def _classify_doc_type(excerpt: str) -> Optional[str]:
+async def _classify_doc_type(excerpt: str, filename: str = "") -> Optional[str]:
     from app.agent.drafting_prompts import CLASSIFY_PROMPT
-    prompt = CLASSIFY_PROMPT.format(excerpt=excerpt)
     try:
+        prompt = CLASSIFY_PROMPT.format(filename=filename, text_excerpt=excerpt)
         client = _bedrock_runtime()
         response = client.converse(
             modelId=_haiku_model(),
