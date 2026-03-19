@@ -91,7 +91,7 @@ def health_check():
 
 # ── Existing scheduled loops (unchanged) ─────────────────────────────────────
 
-SCHEDULED_CAUSELIST_RUNS_IST = [(5, 0), (18, 50), (19, 10)]
+SCHEDULED_CAUSELIST_RUNS_IST = [(5, 0), (18, 45), (19, 15)]
 
 
 def _seconds_until_next_ist_run(hour: int, minute: int) -> float:

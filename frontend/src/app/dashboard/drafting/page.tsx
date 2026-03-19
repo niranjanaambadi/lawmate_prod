@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { PenLine } from "lucide-react";
 import { useAuth }        from "@/contexts/AuthContext";
 import { useWorkspaceStore, type Workspace, type WorkspaceDraft, type CaseContext } from "@/stores/workspaceStore";
 import {
@@ -187,6 +188,21 @@ export default function DraftingPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* ── Page header ───────────────────────────────────────────────────── */}
+      <div className="flex-none bg-white border-b border-slate-200 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 shadow-sm">
+            <PenLine className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">Legal Drafting AI</h1>
+            <p className="text-sm text-slate-500">
+              Multi-workspace · Upload case documents · AI drafts from brief · Chat with your case · Edit &amp; export
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* ── Workspace tab bar ─────────────────────────────────────────────── */}
       <WorkspaceTabs
         workspaces={workspaces}

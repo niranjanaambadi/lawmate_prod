@@ -220,7 +220,18 @@ export default function LegalInsightPage() {
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>(INITIAL_CHAT);
   const [chatInput, setChatInput] = useState("");
   const [chatStreaming, setChatStreaming] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Scroll the messages container to the bottom — sticky only if already near bottom,
+  // or force=true (used when the user sends a message).
+  const scrollChatToBottom = useCallback((force = false) => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (force || nearBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
 
   // ── Load cases on mount ────────────────────────────────────────────────────
 
@@ -495,9 +506,13 @@ export default function LegalInsightPage() {
 
     const userMsg: ChatMsg = { role: "user", content: chatInput.trim() };
     const history = [...chatMessages, userMsg];
+    // Append user message + empty assistant placeholder, then force-scroll so the
+    // user's message is visible (not the empty placeholder far below).
     setChatMessages([...history, { role: "assistant", content: "" }]);
     setChatInput("");
     setChatStreaming(true);
+    // Scroll to show the user's just-sent message (force=true so it always scrolls).
+    setTimeout(() => scrollChatToBottom(true), 20);
 
     try {
       const res = await streamJudgmentChat(job.job_id, history, token);
@@ -526,7 +541,8 @@ export default function LegalInsightPage() {
                 };
                 return updated;
               });
-              chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+              // Sticky-scroll: only follows if user hasn't scrolled up to read history.
+              scrollChatToBottom();
             }
             if (parsed.error) {
               setChatMessages((prev) => {
@@ -554,9 +570,9 @@ export default function LegalInsightPage() {
       });
     } finally {
       setChatStreaming(false);
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+      scrollChatToBottom();
     }
-  }, [chatInput, chatStreaming, chatMessages, job, token]);
+  }, [chatInput, chatStreaming, chatMessages, job, token, scrollChatToBottom]);
 
   const handleChatKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -930,7 +946,7 @@ export default function LegalInsightPage() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
               {chatMessages.map((msg, idx) => (
                 <div
                   key={idx}
@@ -949,7 +965,6 @@ export default function LegalInsightPage() {
                   )}
                 </div>
               ))}
-              <div ref={chatEndRef} />
             </div>
 
             {/* Input bar */}
