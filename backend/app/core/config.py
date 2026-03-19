@@ -185,8 +185,9 @@ class Settings(BaseSettings):
     LEGAL_GLOSSARY_PATH: str = ""  # leave blank to auto-resolve from backend root
 
     # Legal Insight — Judgment Summarizer
-    LEGAL_INSIGHT_MODEL_ID: str = ""          # required; falls back to BEDROCK_MODEL_ID
+    LEGAL_INSIGHT_MODEL_ID: str = "arn:aws:bedrock:ap-south-1:159749281520:application-inference-profile/akm1hbyfv2d1"  # lawmate-fast (Claude Haiku 4.5)
     LEGAL_INSIGHT_MAX_CHARS_PER_CHUNK: int = 3000
+    LEGAL_INSIGHT_MAX_CHUNKS: int = 300       # hard cap after extraction; evenly sampled
     LEGAL_INSIGHT_JOB_TIMEOUT_SEC: int = 600
     LEGAL_INSIGHT_PROMPT_VERSION: str = "v1"
     LEGAL_INSIGHT_ENABLE_OCR_FALLBACK: bool = True

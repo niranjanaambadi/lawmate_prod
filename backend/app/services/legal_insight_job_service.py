@@ -323,9 +323,12 @@ class LegalInsightJobService:
         max_chars: int = int(
             getattr(settings, "LEGAL_INSIGHT_MAX_CHARS_PER_CHUNK", 3000)
         )
+        max_chunks: int = int(
+            getattr(settings, "LEGAL_INSIGHT_MAX_CHUNKS", 300)
+        )
 
         chunks, ocr_used = legal_insight_extractor.extract_text_with_ocr_fallback(
-            pdf_bytes, enable_ocr, max_chars
+            pdf_bytes, enable_ocr, max_chars, max_chunks=max_chunks
         )
 
         if not chunks:

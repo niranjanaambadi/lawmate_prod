@@ -11,6 +11,7 @@ import re
 from typing import Callable, Optional
 
 import boto3
+from botocore.config import Config
 
 from app.core.config import settings
 from app.core.logger import logger
@@ -39,11 +40,19 @@ class LegalInsightLlmService:
         self.max_chars: int = int(
             getattr(settings, "LEGAL_INSIGHT_MAX_CHARS_PER_CHUNK", 3000)
         )
+        # 300 s read timeout: large chunks can take up to ~2 min on Haiku.
+        # Without this, a hung Bedrock call blocks the background task forever.
+        _boto_cfg = Config(
+            read_timeout=300,
+            connect_timeout=10,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
         self.client = boto3.client(
             "bedrock-runtime",
             region_name=settings.AWS_REGION,
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            config=_boto_cfg,
         )
         logger.info("LegalInsightLlmService initialised with model=%s", self.model)
 
@@ -249,7 +258,9 @@ class LegalInsightLlmService:
 
         *on_progress* is called with an integer (0-100) at key milestones.
         """
-        MODEL_WINDOW = 60  # max chunks per single Bedrock call
+        # 300 chunks (post-sampling cap) ÷ 100 per batch = ≤ 3 Bedrock map calls.
+        # Previously 60 chunks/batch → up to 50 calls on a 1500-page document.
+        MODEL_WINDOW = 100  # max chunks per single Bedrock call
         valid_chunk_ids: set[str] = {c["chunk_id"] for c in chunks}
         all_chunk_ids: list[str] = [c["chunk_id"] for c in chunks]
 
@@ -320,6 +331,22 @@ class LegalInsightLlmService:
             raise ValueError("All map batches failed — cannot produce a summary")
 
         # ---- Reduce / synthesis -----------------------------------------
+        # Cap partial summaries passed to synthesis: each summary is ~2-5k tokens
+        # in JSON form; 20 summaries is already a very long prompt.
+        MAX_SYNTHESIS_PARTIALS = 20
+        if len(partial_summaries) > MAX_SYNTHESIS_PARTIALS:
+            logger.warning(
+                "Capping synthesis input from %d → %d partial summaries",
+                len(partial_summaries),
+                MAX_SYNTHESIS_PARTIALS,
+            )
+            # Keep evenly spaced partials so all document sections are represented.
+            step = len(partial_summaries) / MAX_SYNTHESIS_PARTIALS
+            partial_summaries = [
+                partial_summaries[int(i * step)]
+                for i in range(MAX_SYNTHESIS_PARTIALS)
+            ]
+
         logger.info("Reduce phase: synthesising %d partial summaries", len(partial_summaries))
         _progress(75)
         synthesis_prompt = self._build_synthesis_prompt(partial_summaries, all_chunk_ids)
