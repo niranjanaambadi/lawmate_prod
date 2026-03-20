@@ -589,6 +589,7 @@ export default function TranslatePage() {
   const [docStreamPhase, setDocStreamPhase] = useState<"idle" | "extracting" | "translating">("idle");
   const docStreamAbortRef = useRef<(() => void) | null>(null);
   const docAccumulatedRef = useRef<string>("");
+  const [docFileUrl, setDocFileUrl] = useState<string | null>(null);
 
   // For display: use resolved direction from result, or the manual selection
   const displayDirection: TranslateDirection =
@@ -693,6 +694,14 @@ export default function TranslatePage() {
 
   // ── Document translation ──────────────────────────────────────────────────
 
+  // Create / revoke object URL for document preview
+  useEffect(() => {
+    if (!docFile) { setDocFileUrl(null); return; }
+    const url = URL.createObjectURL(docFile);
+    setDocFileUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [docFile]);
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0] ?? null;
     if (!file) return;
@@ -706,6 +715,7 @@ export default function TranslatePage() {
     setDocFile(file);
     setDocResult(null);
     setDocError(null);
+    setDocStreamingText("");
   }
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -722,6 +732,7 @@ export default function TranslatePage() {
     setDocFile(file);
     setDocResult(null);
     setDocError(null);
+    setDocStreamingText("");
   }
 
   function handleTranslateDoc() {
@@ -1084,36 +1095,72 @@ export default function TranslatePage() {
       {/* ── Document tab ── */}
       {activeTab === "document" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
+          <Card className="flex flex-col">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Upload document</CardTitle>
-              <CardDescription>
-                Supported formats: PDF, DOCX, TXT · Max 10 MB
-              </CardDescription>
+              {docFile ? (
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <CardTitle className="text-base truncate">{docFile.name}</CardTitle>
+                    <CardDescription>{formatBytes(docFile.size)}</CardDescription>
+                  </div>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="shrink-0 flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:bg-slate-50 transition-colors"
+                    title="Choose a different file"
+                  >
+                    <Upload className="h-3 w-3" />
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <CardTitle className="text-base">Upload document</CardTitle>
+                  <CardDescription>
+                    Supported formats: PDF, DOCX, TXT · Max 10 MB
+                  </CardDescription>
+                </>
+              )}
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors",
-                  docFile
-                    ? "border-indigo-300 bg-indigo-50"
-                    : "border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50"
-                )}
-              >
-                <Upload className="h-8 w-8 text-slate-400" />
-                {docFile ? (
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-indigo-700">
-                      {docFile.name}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {formatBytes(docFile.size)}
+            <CardContent className="flex flex-col gap-4 flex-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.txt"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {docFile && docFileUrl ? (
+                /* ── Document preview ──────────────────────────────── */
+                docFile.type === "application/pdf" || docFile.name.endsWith(".pdf") ? (
+                  <iframe
+                    src={docFileUrl}
+                    className="w-full rounded-md border border-slate-200 bg-white"
+                    style={{ height: "420px" }}
+                    title="Document preview"
+                  />
+                ) : (
+                  /* DOCX / TXT — browsers can't render these natively */
+                  <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-slate-200 bg-slate-50 text-slate-400"
+                    style={{ height: "420px" }}>
+                    <FileText className="h-10 w-10" />
+                    <p className="text-sm text-center">
+                      Preview not available for {docFile.name.split(".").pop()?.toUpperCase()} files.
+                      <br />
+                      <span className="text-xs">The document will be translated as-is.</span>
                     </p>
                   </div>
-                ) : (
+                )
+              ) : (
+                /* ── Upload drop zone ──────────────────────────────── */
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-8 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
+                  style={{ minHeight: "260px" }}
+                >
+                  <Upload className="h-8 w-8 text-slate-400" />
                   <div className="text-center">
                     <p className="text-sm font-medium text-slate-700">
                       Drag & drop or click to upload
@@ -1122,15 +1169,9 @@ export default function TranslatePage() {
                       PDF, DOCX, or TXT
                     </p>
                   </div>
-                )}
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.doc,.txt"
-                className="hidden"
-                onChange={handleFileChange}
-              />
+                </div>
+              )}
+
               <Button
                 onClick={handleTranslateDoc}
                 disabled={!docFile || docLoading}
@@ -1148,6 +1189,7 @@ export default function TranslatePage() {
                   </>
                 )}
               </Button>
+
               {docError && (
                 <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
                   <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />

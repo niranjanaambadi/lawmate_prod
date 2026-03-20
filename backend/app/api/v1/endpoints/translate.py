@@ -244,7 +244,7 @@ async def translate_document_stream(
             return
 
         chunks = chunk_text(text)
-        yield f"data: {json.dumps({'type': 'extracted', 'total_chunks': len(chunks), 'char_count': len(text)})}\n\n"
+        yield f"data: {json.dumps({'type': 'extracted', 'total_chunks': len(chunks), 'char_count': len(text), 'source_text': text})}\n\n"
 
         # ── Phase 2: translate chunk by chunk ────────────────────────────────
         total_glossary_hits = 0
