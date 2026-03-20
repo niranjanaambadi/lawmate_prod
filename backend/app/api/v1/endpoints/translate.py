@@ -361,10 +361,12 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-    from reportlab.lib.enums import TA_LEFT
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+    from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+    import datetime
     import os
 
     buf = io.BytesIO()
@@ -380,6 +382,7 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
     styles = getSampleStyleSheet()
 
     font_name = "Helvetica"
+    font_bold = "Helvetica-Bold"
     font_candidates = [
         "/System/Library/Fonts/Supplemental/NotoSansMalayalam.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMalayalam-Regular.ttf",
@@ -390,17 +393,11 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
             try:
                 pdfmetrics.registerFont(TTFont("NotoMal", candidate))
                 font_name = "NotoMal"
+                font_bold = "NotoMal"
             except Exception:
                 pass
             break
 
-    title_style = ParagraphStyle(
-        "TransTitle",
-        parent=styles["Heading1"],
-        fontName=font_name,
-        fontSize=14,
-        spaceAfter=12,
-    )
     body_style = ParagraphStyle(
         "TransBody",
         parent=styles["Normal"],
@@ -409,19 +406,58 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
         leading=18,
         spaceAfter=8,
     )
-    meta_style = ParagraphStyle(
-        "TransMeta",
+    header_right_style = ParagraphStyle(
+        "TransHeaderRight",
+        parent=styles["Normal"],
+        fontName=font_bold,
+        fontSize=9,
+        textColor=colors.HexColor("#4F46E5"),
+        alignment=TA_RIGHT,
+    )
+    header_sub_style = ParagraphStyle(
+        "TransHeaderSub",
         parent=styles["Normal"],
         fontName=font_name,
-        fontSize=9,
-        textColor=(0.5, 0.5, 0.5),
-        spaceAfter=20,
+        fontSize=8,
+        textColor=colors.HexColor("#6B7280"),
+        alignment=TA_RIGHT,
+        spaceAfter=16,
+    )
+    divider_style = ParagraphStyle(
+        "Divider",
+        parent=styles["Normal"],
+        fontSize=1,
+        spaceAfter=16,
     )
 
-    dir_label = "English → Malayalam" if direction == "en_to_ml" else "Malayalam → English"
+    dir_label = "English \u2192 Malayalam" if direction == "en_to_ml" else "Malayalam \u2192 English"
+    today = datetime.date.today().strftime("%-d %B %Y")
+
+    page_width = A4[0] - 5 * cm  # total usable width
+
+    # Two-column header row: empty left | LawMate™ branding right
+    header_table = Table(
+        [[
+            Paragraph("", body_style),
+            Paragraph(
+                f"LawMate\u2122 \u00b7 Legal Translation",
+                header_right_style,
+            ),
+        ]],
+        colWidths=[page_width * 0.5, page_width * 0.5],
+    )
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
     story = [
-        Paragraph(title, title_style),
-        Paragraph(f"Legal Translation  ·  {dir_label}", meta_style),
+        header_table,
+        Paragraph(f"{dir_label}  \u00b7  {today}", header_sub_style),
+        Spacer(1, 0.3 * cm),
     ]
 
     for para in text.split("\n\n"):
@@ -438,18 +474,45 @@ def _build_pdf(text: str, title: str, direction: str) -> bytes:
 
 def _build_docx(text: str, title: str, direction: str) -> bytes:
     """Generate a DOCX using python-docx."""
+    import datetime
     import docx
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
 
     document = docx.Document()
-    document.add_heading(title, level=1)
 
-    dir_label = "English → Malayalam" if direction == "en_to_ml" else "Malayalam → English"
-    meta = document.add_paragraph()
-    run = meta.add_run(f"Legal Translation  ·  {dir_label}")
-    run.italic = True
-    run.font.color.rgb = docx.shared.RGBColor(0x88, 0x88, 0x88)
+    dir_label = "English \u2192 Malayalam" if direction == "en_to_ml" else "Malayalam \u2192 English"
+    today = datetime.date.today().strftime("%-d %B %Y")
 
-    document.add_paragraph()
+    # Right-aligned LawMate™ branding line
+    brand = document.add_paragraph()
+    brand.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r1 = brand.add_run("LawMate\u2122 \u00b7 Legal Translation")
+    r1.bold = True
+    r1.font.color.rgb = docx.shared.RGBColor(0x4F, 0x46, 0xE5)
+    r1.font.size = docx.shared.Pt(10)
+
+    # Right-aligned direction + date sub-line
+    sub = document.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r2 = sub.add_run(f"{dir_label}  \u00b7  {today}")
+    r2.italic = True
+    r2.font.color.rgb = docx.shared.RGBColor(0x6B, 0x72, 0x80)
+    r2.font.size = docx.shared.Pt(8)
+
+    # Thin horizontal rule via bottom border on the sub paragraph
+    pPr = sub._p.get_or_add_pPr()
+    pBdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "4")
+    bottom.set(qn("w:space"), "4")
+    bottom.set(qn("w:color"), "C7D2FE")
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+    document.add_paragraph()  # spacer
 
     for para in text.split("\n\n"):
         para = para.strip()
