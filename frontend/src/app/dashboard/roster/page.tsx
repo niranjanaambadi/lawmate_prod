@@ -9,7 +9,6 @@ import {
   FileText,
   Loader2,
   RefreshCcw,
-  Scale,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -104,8 +103,8 @@ export default function RosterPage() {
       {/* ── Page header ── */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">
-            <Scale className="h-5 w-5" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+            <FileText className="h-5 w-5" />
           </div>
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-900">

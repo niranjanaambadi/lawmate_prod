@@ -21,7 +21,7 @@ _OVERLAP_CHARS = 100  # slight overlap to keep sentence context at boundaries
 # ── Text extraction helpers ────────────────────────────────────────────────
 
 
-def _extract_pdf(data: bytes) -> str:
+def _extract_pdf(data: bytes, ocr_lang: str = "eng") -> str:
     """
     Extract plain text from a PDF byte blob.
 
@@ -29,9 +29,11 @@ def _extract_pdf(data: bytes) -> str:
       1. Try pypdf native text extraction.
       2. If the result is sparse (< 200 avg chars/page) — i.e. the PDF is
          scanned or image-based — fall back to Tesseract OCR.
+
+    ocr_lang: Tesseract language string, e.g. "eng", "mal+eng".
     """
     text, page_count, was_ocr = _extract_pdf_with_threshold(
-        data, min_chars_per_page=200
+        data, min_chars_per_page=200, ocr_lang=ocr_lang
     )
     if was_ocr:
         logger.info(
@@ -44,7 +46,7 @@ def _extract_pdf(data: bytes) -> str:
     return text
 
 
-def _extract_pdf_with_threshold(data: bytes, min_chars_per_page: int = 200) -> tuple:
+def _extract_pdf_with_threshold(data: bytes, min_chars_per_page: int = 200, ocr_lang: str = "eng") -> tuple:
     """
     Internal helper: pypdf native → OCR fallback at *min_chars_per_page* threshold.
     Returns (text, page_count, was_ocr_used).
@@ -96,7 +98,7 @@ def _extract_pdf_with_threshold(data: bytes, min_chars_per_page: int = 200) -> t
         ocr_pages: List[str] = []
         for img in images:
             try:
-                ocr_pages.append(pytesseract.image_to_string(img, lang="eng"))
+                ocr_pages.append(pytesseract.image_to_string(img, lang=ocr_lang))
             except Exception as ocr_exc:
                 logger.debug("_extract_pdf OCR page failed: %s", ocr_exc)
                 ocr_pages.append("")
@@ -141,7 +143,7 @@ def _extract_txt(data: bytes) -> str:
         return data.decode("latin-1", errors="replace")
 
 
-def extract_text(data: bytes, mime_type: str) -> str:
+def extract_text(data: bytes, mime_type: str, ocr_lang: str = "eng") -> str:
     """
     Dispatch to the right extractor based on MIME type.
 
@@ -149,7 +151,7 @@ def extract_text(data: bytes, mime_type: str) -> str:
                text/plain.
     """
     if mime_type == "application/pdf":
-        return _extract_pdf(data)
+        return _extract_pdf(data, ocr_lang=ocr_lang)
     if mime_type in (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword",
@@ -296,7 +298,9 @@ class DocumentTranslateService:
 
         Returns the same dict as translate_document_text, plus "char_count".
         """
-        text = extract_text(data, mime_type)
+        # Always use both Malayalam and English OCR — handles mixed-script
+        # scanned documents (court orders often contain both scripts).
+        text = extract_text(data, mime_type, ocr_lang="mal+eng")
         result = self.translate_document_text(text, direction)
         result["char_count"] = len(text)
         return result

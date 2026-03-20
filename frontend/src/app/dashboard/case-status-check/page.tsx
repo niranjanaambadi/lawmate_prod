@@ -15,7 +15,7 @@ import {
   Gavel,
   Loader2,
   PlusCircle,
-  Scale,
+  Clock3,
   Search,
   Users,
 } from "lucide-react";
@@ -268,8 +268,8 @@ export default function CaseStatusPage() {
       {/* ── Page header ──────────────────────────────────────────────────────── */}
       <div className="flex-none bg-white border-b border-slate-200 px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 shadow-sm">
-            <Scale className="h-5 w-5 text-white" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 shadow-sm">
+            <Clock3 className="h-5 w-5 text-white" />
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-900">Case Status Check</h1>
@@ -345,7 +345,7 @@ export default function CaseStatusPage() {
             <button
               onClick={fetchStatus}
               disabled={searching}
-              className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors shadow-sm"
+              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors shadow-sm"
             >
               {searching ? (
                 <>
@@ -374,7 +374,7 @@ export default function CaseStatusPage() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
 
               {/* Result header */}
-              <div className="bg-slate-900 px-5 py-4 flex items-start justify-between gap-4">
+              <div className="bg-indigo-700 px-5 py-4 flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Case</p>
                   <p className="text-lg font-bold text-white mt-0.5">{result.case_number}</p>

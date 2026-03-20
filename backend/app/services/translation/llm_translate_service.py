@@ -67,6 +67,9 @@ STYLE RULES:
    "is directed" → "നിർദ്ദേശിക്കപ്പെടുന്നു"
    "is hereby ordered" → "ഇതിനാൽ ഉത്തരവ് ആകുന്നു"
 8. Do not add any text not present in the source.
+9. If the source text contains OCR artefacts, minor encoding noise, or
+   imperfectly scanned characters, make your best effort to translate the
+   legible portions. NEVER refuse to translate — always produce output.
 
 EXAMPLE (showing correct placeholder handling):
   Source:  "The __PROT_0001__ directed the respondent to pay <<GLOSS_1>> \
@@ -108,6 +111,9 @@ STYLE RULES:
    "ഉത്തരവ് ആകുന്നു" → "It is hereby ordered"
    "നിർദ്ദേശിക്കപ്പെടുന്നു" → "is directed"
 8. Do not add any text not present in the source.
+9. If the source text contains OCR artefacts, minor encoding noise, or
+   imperfectly scanned characters, make your best effort to translate the
+   legible portions. NEVER refuse to translate — always produce output.
 
 EXAMPLE (showing correct placeholder handling):
   Source:  "__PROT_0001__ ഹർജ്ജിക്കാരനോട് __PROT_0002__ ന്റെ 30 ദിവസത്തിനകം \
