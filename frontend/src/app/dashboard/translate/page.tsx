@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   translateTextStream,
-  translateDocument,
+  translateDocumentStream,
+  TranslateDocumentStreamDoneEvent,
   exportTranslation,
   openCaseNotebook,
   createNotebookNote,
@@ -576,13 +577,18 @@ export default function TranslatePage() {
 
   // Document-mode state
   const [docFile, setDocFile] = useState<File | null>(null);
-  const [docResult, setDocResult] = useState<TranslateDocumentResponse | null>(
-    null
-  );
+  const [docResult, setDocResult] = useState<TranslateDocumentResponse | null>(null);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [docCopied, setDocCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Streaming state for document translation
+  const [docStreamingText, setDocStreamingText] = useState("");
+  const [docStreamChunk, setDocStreamChunk] = useState(0);   // chunks done so far
+  const [docStreamTotal, setDocStreamTotal] = useState(0);   // total chunks
+  const [docStreamPhase, setDocStreamPhase] = useState<"idle" | "extracting" | "translating">("idle");
+  const docStreamAbortRef = useRef<(() => void) | null>(null);
+  const docAccumulatedRef = useRef<string>("");
 
   // For display: use resolved direction from result, or the manual selection
   const displayDirection: TranslateDirection =
@@ -718,21 +724,74 @@ export default function TranslatePage() {
     setDocError(null);
   }
 
-  async function handleTranslateDoc() {
-    if (!docFile) return;
+  function handleTranslateDoc() {
+    if (!docFile || docLoading) return;
+
+    // Abort any previous stream
+    docStreamAbortRef.current?.();
+    docStreamAbortRef.current = null;
+
     setDocLoading(true);
     setDocError(null);
     setDocResult(null);
-    try {
-      setDocResult(await translateDocument(docFile, direction, token));
-    } catch (err: unknown) {
-      setDocError(
-        err instanceof Error ? err.message : "Document translation failed."
-      );
-    } finally {
-      setDocLoading(false);
-    }
+    setDocStreamingText("");
+    setDocStreamChunk(0);
+    setDocStreamTotal(0);
+    setDocStreamPhase("extracting");
+    docAccumulatedRef.current = "";
+
+    const abort = translateDocumentStream(
+      docFile,
+      direction,
+      token,
+      // onExtracted — OCR done, chunks known
+      (totalChunks, _charCount) => {
+        setDocStreamTotal(totalChunks);
+        setDocStreamPhase("translating");
+      },
+      // onChunk — one translated chunk arrived
+      (_index, _total, text, _failed) => {
+        docAccumulatedRef.current = docAccumulatedRef.current
+          ? docAccumulatedRef.current + "\n\n" + text
+          : text;
+        setDocStreamChunk((n) => n + 1);
+        setDocStreamingText(docAccumulatedRef.current);
+      },
+      // onDone — all chunks done
+      (result: TranslateDocumentStreamDoneEvent) => {
+        setDocLoading(false);
+        setDocStreamPhase("idle");
+        docStreamAbortRef.current = null;
+        setDocResult({
+          translated: docAccumulatedRef.current,
+          direction: result.direction,
+          filename: result.filename,
+          mime_type: docFile.type || "application/octet-stream",
+          chunks: result.total_chunks,
+          glossary_hits: result.glossary_hits,
+          warnings: result.warnings,
+          char_count: result.char_count,
+        });
+        setDocStreamingText("");
+      },
+      // onError
+      (err) => {
+        setDocLoading(false);
+        setDocStreamPhase("idle");
+        docStreamAbortRef.current = null;
+        docAccumulatedRef.current = "";
+        setDocError(err);
+        setDocStreamingText("");
+      }
+    );
+
+    docStreamAbortRef.current = abort;
   }
+
+  // Cleanup stream on unmount / file change
+  useEffect(() => {
+    return () => { docStreamAbortRef.current?.(); };
+  }, []);
 
   async function copyDoc() {
     if (!docResult) return;
@@ -1104,19 +1163,68 @@ export default function TranslatePage() {
               <CardDescription>
                 {docResult
                   ? `${docResult.filename} — ${docResult.chunks} chunk${docResult.chunks !== 1 ? "s" : ""} processed`
+                  : docStreamPhase === "extracting"
+                  ? "Running OCR on document…"
+                  : docStreamPhase === "translating" && docStreamTotal > 0
+                  ? `Translating chunk ${docStreamChunk} of ${docStreamTotal}…`
                   : "Upload and translate a document to see the result"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {/* Progress bar — visible while streaming */}
+              {docLoading && docStreamTotal > 0 && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      {docStreamPhase === "extracting"
+                        ? "Extracting text with OCR…"
+                        : `Chunk ${docStreamChunk} / ${docStreamTotal}`}
+                    </span>
+                    <span className="tabular-nums">
+                      {docStreamTotal > 0
+                        ? Math.round((docStreamChunk / docStreamTotal) * 100)
+                        : 0}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                      style={{
+                        width: docStreamTotal > 0
+                          ? `${Math.round((docStreamChunk / docStreamTotal) * 100)}%`
+                          : "0%",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {/* Extracting spinner (before first chunk) */}
+              {docLoading && docStreamPhase === "extracting" && (
+                <div className="flex h-full min-h-[40px] items-center gap-2 text-sm text-slate-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Running OCR — this may take a moment for scanned PDFs…
+                </div>
+              )}
               <div className="min-h-[260px] max-h-[400px] overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-3">
-                {docLoading ? (
+                {/* Live streaming text */}
+                {docStreamingText ? (
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                    {docStreamingText}
+                    {docLoading && (
+                      <span className="inline-block ml-1 h-3.5 w-0.5 bg-indigo-400 animate-pulse" />
+                    )}
+                  </p>
+                ) : docLoading && docStreamPhase !== "idle" ? (
                   <div className="flex h-full min-h-[220px] items-center justify-center">
-                    <div className="text-center space-y-2 text-slate-400">
-                      <Loader2 className="h-8 w-8 animate-spin mx-auto" />
-                      <p className="text-sm">Translating document chunks…</p>
-                      <p className="text-xs">
-                        Large documents may take a moment
-                      </p>
+                    <div className="flex gap-1.5">
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          className="block h-2 w-2 rounded-full bg-indigo-300 animate-bounce"
+                          style={{ animationDelay: `${i * 0.15}s` }}
+                        />
+                      ))}
                     </div>
                   </div>
                 ) : docResult ? (

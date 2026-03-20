@@ -200,6 +200,94 @@ def translate_text_stream(
 
 
 @router.post(
+    "/document/stream",
+    summary="Translate uploaded document — chunk-by-chunk SSE stream",
+    description=(
+        "Upload a PDF, DOCX, or TXT file. The backend extracts text (OCR for scanned PDFs), "
+        "then translates each chunk and streams it via SSE as soon as it is ready. "
+        "Event types: 'extracted' (OCR done, total chunk count known), "
+        "'chunk' (one translated chunk), 'done' (final quality metadata), 'error'."
+    ),
+)
+async def translate_document_stream(
+    file: UploadFile = File(...),
+    direction: Direction = Form("en_to_ml"),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Translate an uploaded document with per-chunk SSE streaming."""
+    from app.services.translation.document_translate_service import extract_text, chunk_text
+    from app.services.translation.protect_service import protect_service
+    from app.services.translation.glossary_service import glossary_service
+
+    content_type = (file.content_type or "").split(";")[0].strip()
+    if content_type not in _ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file type '{content_type}'. Allowed: PDF, DOCX, TXT.",
+        )
+
+    data = await file.read()
+    if len(data) > _MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large ({len(data) // 1024} KB). Maximum is 10 MB.",
+        )
+
+    filename = file.filename or "document"
+
+    def generate():
+        # ── Phase 1: OCR / text extraction ──────────────────────────────────
+        try:
+            text = extract_text(data, content_type, ocr_lang="mal+eng")
+        except (ValueError, RuntimeError) as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            return
+
+        chunks = chunk_text(text)
+        yield f"data: {json.dumps({'type': 'extracted', 'total_chunks': len(chunks), 'char_count': len(text)})}\n\n"
+
+        # ── Phase 2: translate chunk by chunk ────────────────────────────────
+        total_glossary_hits = 0
+        all_warnings: list = []
+        translated_parts: list = []
+
+        for idx, chunk in enumerate(chunks):
+            protected, pmap = protect_service.protect_text(chunk)
+            try:
+                translated_protected = llm_translate_service.translate_chunk(
+                    protected, direction
+                )
+            except RuntimeError as exc:
+                logger.error("Document stream chunk %d/%d failed: %s", idx + 1, len(chunks), exc)
+                translated_parts.append(chunk)
+                all_warnings.append(f"Chunk {idx + 1} failed: {exc}")
+                yield f"data: {json.dumps({'type': 'chunk', 'index': idx, 'total': len(chunks), 'text': chunk, 'failed': True})}\n\n"
+                continue
+
+            restored = protect_service.restore_text(translated_protected, pmap)
+            warnings = protect_service.validate_protection(chunk, restored)
+            all_warnings.extend(warnings)
+
+            hits = len(glossary_service.find_matches(chunk, direction))
+            total_glossary_hits += hits
+            translated_parts.append(restored)
+
+            yield f"data: {json.dumps({'type': 'chunk', 'index': idx, 'total': len(chunks), 'text': restored})}\n\n"
+
+        # ── Phase 3: done ─────────────────────────────────────────────────────
+        yield f"data: {json.dumps({'type': 'done', 'total_chunks': len(chunks), 'glossary_hits': total_glossary_hits, 'warnings': all_warnings, 'char_count': len(text), 'filename': filename, 'direction': direction})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
     "/document",
     response_model=TranslateDocumentResponse,
     summary="Translate uploaded legal document",

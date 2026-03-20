@@ -1610,6 +1610,122 @@ export async function translateDocument(
   return res.json() as Promise<TranslateDocumentResponse>;
 }
 
+export interface TranslateDocumentStreamExtractedEvent {
+  type: "extracted";
+  total_chunks: number;
+  char_count: number;
+}
+
+export interface TranslateDocumentStreamChunkEvent {
+  type: "chunk";
+  index: number;
+  total: number;
+  text: string;
+  failed?: boolean;
+}
+
+export interface TranslateDocumentStreamDoneEvent {
+  type: "done";
+  total_chunks: number;
+  glossary_hits: number;
+  warnings: string[];
+  char_count: number;
+  filename: string;
+  direction: TranslateDirection;
+}
+
+/**
+ * Upload a document and stream the translation chunk-by-chunk via SSE.
+ *
+ * Callbacks:
+ *  onExtracted(totalChunks, charCount) — called once OCR is done, before any chunk
+ *  onChunk(index, total, text)         — called for each translated chunk
+ *  onDone(result)                      — called with final quality metadata
+ *  onError(message)                    — called on any error
+ *
+ * Returns a cleanup function to abort the stream.
+ */
+export function translateDocumentStream(
+  file: File,
+  direction: TranslateDirection,
+  token: string | null,
+  onExtracted: (totalChunks: number, charCount: number) => void,
+  onChunk: (index: number, total: number, text: string, failed?: boolean) => void,
+  onDone: (result: TranslateDocumentStreamDoneEvent) => void,
+  onError: (err: string) => void
+): () => void {
+  const baseUrl = (
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_API_URL || ""
+      : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  ).replace(/\/$/, "");
+
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("direction", direction);
+
+      const headers: Record<string, string> = { Accept: "text/event-stream" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`${baseUrl}/api/v1/translate/document/stream`, {
+        method: "POST",
+        headers,
+        body: formData,
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        onError((err as { detail?: string }).detail || res.statusText || "Stream failed");
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) { onError("No response body"); return; }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+
+        for (const eventStr of events) {
+          const line = eventStr.replace(/^data:\s*/, "").trim();
+          if (!line) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.type === "error") { onError(parsed.message || "Unknown error"); return; }
+            if (parsed.type === "extracted") {
+              onExtracted(parsed.total_chunks, parsed.char_count);
+            } else if (parsed.type === "chunk") {
+              onChunk(parsed.index, parsed.total, parsed.text, parsed.failed);
+            } else if (parsed.type === "done") {
+              onDone(parsed as TranslateDocumentStreamDoneEvent);
+              return;
+            }
+          } catch {
+            // ignore malformed SSE lines
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name === "AbortError") return;
+      onError(err instanceof Error ? err.message : "Stream error");
+    }
+  })();
+
+  return () => controller.abort();
+}
+
 // ── Translation export ─────────────────────────────────────────────────────
 
 /**

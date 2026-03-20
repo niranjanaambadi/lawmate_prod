@@ -21,39 +21,79 @@ _OVERLAP_CHARS = 100  # slight overlap to keep sentence context at boundaries
 # ── Text extraction helpers ────────────────────────────────────────────────
 
 
-def _extract_pdf(data: bytes, ocr_lang: str = "eng") -> str:
+def _extract_pdf_force_ocr(data: bytes, lang: str = "mal+eng") -> str:
     """
-    Extract plain text from a PDF byte blob.
+    Extract text from a PDF using the same Force-OCR path as the OCR page:
+      1. Render each page with PyMuPDF (fitz) at 2× scale → PIL image.
+      2. Run Tesseract with *lang* (default "mal+eng") on every page.
+      3. If Tesseract yields nothing for a page, fall back to pypdf native
+         text for that page only (same merge logic as the OCR page).
 
-    Strategy:
-      1. Try pypdf native text extraction.
-      2. If the result is sparse (< 200 avg chars/page) — i.e. the PDF is
-         scanned or image-based — fall back to Tesseract OCR.
-
-    ocr_lang: Tesseract language string, e.g. "eng", "mal+eng".
+    This is the canonical path for scanned / image-based PDFs such as
+    court orders and Malayalam legal documents.
     """
-    text, page_count, was_ocr = _extract_pdf_with_threshold(
-        data, min_chars_per_page=200, ocr_lang=ocr_lang
-    )
-    if was_ocr:
+    try:
+        import fitz  # type: ignore  (PyMuPDF)
+        import pytesseract  # type: ignore
+        from PIL import Image  # type: ignore
+
+        # ── render pages via fitz ──────────────────────────────────────────
+        doc = fitz.open(stream=data, filetype="pdf")
+        ocr_pages: List[str] = []
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            mode = "RGBA" if pix.alpha else "RGB"
+            image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+            try:
+                text = pytesseract.image_to_string(image, lang=lang).strip()
+            except Exception as ocr_exc:
+                logger.debug("_extract_pdf_force_ocr: page OCR failed: %s", ocr_exc)
+                text = ""
+            ocr_pages.append(text)
+        doc.close()
+
+        # ── fallback: for any page where OCR produced nothing, try pypdf ──
+        has_blank = any(not t for t in ocr_pages)
+        if has_blank:
+            try:
+                import io as _io
+                import pypdf  # type: ignore
+
+                reader = pypdf.PdfReader(_io.BytesIO(data))
+                native_pages = [
+                    (reader.pages[i].extract_text() or "").strip()
+                    for i in range(len(reader.pages))
+                ]
+                merged = [
+                    ocr_pages[i] if ocr_pages[i] else native_pages[i]
+                    for i in range(min(len(ocr_pages), len(native_pages)))
+                ]
+                ocr_pages = merged
+            except Exception as native_exc:
+                logger.debug(
+                    "_extract_pdf_force_ocr: native fallback failed: %s", native_exc
+                )
+
+        result = "\n\n".join(ocr_pages).strip()
         logger.info(
-            "_extract_pdf: OCR used on %d-page PDF (sparse native text)", page_count
+            "_extract_pdf_force_ocr: %d pages, lang=%s, %d chars extracted",
+            len(ocr_pages), lang, len(result),
         )
-    else:
-        logger.debug(
-            "_extract_pdf: native pypdf OK (%d pages)", page_count
-        )
-    return text
+        return result
+
+    except Exception as exc:
+        logger.error("_extract_pdf_force_ocr failed: %s", exc)
+        # Last resort — old threshold-based path
+        return _extract_pdf_threshold_fallback(data, ocr_lang=lang)
 
 
-def _extract_pdf_with_threshold(data: bytes, min_chars_per_page: int = 200, ocr_lang: str = "eng") -> tuple:
+def _extract_pdf_threshold_fallback(data: bytes, ocr_lang: str = "mal+eng") -> str:
     """
-    Internal helper: pypdf native → OCR fallback at *min_chars_per_page* threshold.
-    Returns (text, page_count, was_ocr_used).
+    Legacy threshold-based extraction kept as a last-resort fallback.
+    Tries pypdf native; if sparse, falls back to pdf2image + Tesseract.
     """
     import io as _io
 
-    # ── 1. pypdf native ────────────────────────────────────────────────────
     try:
         import pypdf  # type: ignore
 
@@ -69,56 +109,35 @@ def _extract_pdf_with_threshold(data: bytes, min_chars_per_page: int = 200, ocr_
         native_text = "\n\n".join(pages_text).strip()
         avg_chars = len(native_text) / max(page_count, 1)
 
-        if avg_chars >= min_chars_per_page:
-            return native_text, page_count, False
-
-        logger.info(
-            "_extract_pdf_with_threshold: sparse native text "
-            "(%.0f avg chars/page < %d threshold) → trying OCR",
-            avg_chars, min_chars_per_page,
-        )
+        if avg_chars >= 200:
+            return native_text
 
     except Exception as exc:
-        logger.warning(
-            "_extract_pdf_with_threshold: pypdf failed (%s) → trying OCR", exc
-        )
+        logger.warning("_extract_pdf_threshold_fallback: pypdf failed (%s)", exc)
         page_count = 0
         native_text = ""
 
-    # ── 2. OCR fallback ────────────────────────────────────────────────────
     try:
         import pytesseract  # type: ignore
         from pdf2image import convert_from_bytes  # type: ignore
         from PIL import Image  # type: ignore
 
         images: List[Image.Image] = convert_from_bytes(data, dpi=200, fmt="jpeg")
-        if page_count == 0:
-            page_count = len(images)
-
         ocr_pages: List[str] = []
         for img in images:
             try:
                 ocr_pages.append(pytesseract.image_to_string(img, lang=ocr_lang))
-            except Exception as ocr_exc:
-                logger.debug("_extract_pdf OCR page failed: %s", ocr_exc)
+            except Exception:
                 ocr_pages.append("")
-
-        ocr_text = "\n\n".join(ocr_pages).strip()
-        logger.info(
-            "_extract_pdf_with_threshold: OCR produced %d chars from %d pages",
-            len(ocr_text), len(images),
-        )
-        return ocr_text, page_count, True
+        return "\n\n".join(ocr_pages).strip()
 
     except Exception as exc:
-        logger.error("_extract_pdf_with_threshold: OCR fallback failed: %s", exc)
+        logger.error("_extract_pdf_threshold_fallback: OCR also failed: %s", exc)
 
-    # ── 3. Hard failure ────────────────────────────────────────────────────
-    placeholder = (
+    return (
         "[Text extraction failed — the PDF appears to be image-only and OCR "
         "could not process it. Please upload a native PDF or a TXT file.]"
     )
-    return placeholder, max(page_count, 0), True
 
 
 def _extract_docx(data: bytes) -> str:
@@ -143,15 +162,20 @@ def _extract_txt(data: bytes) -> str:
         return data.decode("latin-1", errors="replace")
 
 
-def extract_text(data: bytes, mime_type: str, ocr_lang: str = "eng") -> str:
+def extract_text(data: bytes, mime_type: str, ocr_lang: str = "mal+eng") -> str:
     """
     Dispatch to the right extractor based on MIME type.
+
+    For PDFs: always uses the Force-OCR path (fitz + Tesseract mal+eng),
+    same as ticking "Force OCR" on the OCR page.  This correctly handles
+    scanned Malayalam court documents that fool pypdf into returning
+    garbled or empty text.
 
     Supported: application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document,
                text/plain.
     """
     if mime_type == "application/pdf":
-        return _extract_pdf(data, ocr_lang=ocr_lang)
+        return _extract_pdf_force_ocr(data, lang=ocr_lang)
     if mime_type in (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword",
@@ -296,11 +320,18 @@ class DocumentTranslateService:
         """
         Extract text from raw file bytes, then translate.
 
+        PDFs always go through the Force-OCR path (fitz + Tesseract mal+eng)
+        — the same workflow as ticking "Force OCR" on the OCR page.  This
+        avoids the garbled-text problem that occurs when pypdf tries to read
+        a scanned Malayalam PDF.
+
         Returns the same dict as translate_document_text, plus "char_count".
         """
-        # Always use both Malayalam and English OCR — handles mixed-script
-        # scanned documents (court orders often contain both scripts).
         text = extract_text(data, mime_type, ocr_lang="mal+eng")
+        if not text.strip():
+            logger.warning(
+                "translate_bytes: extraction produced empty text for mime=%s", mime_type
+            )
         result = self.translate_document_text(text, direction)
         result["char_count"] = len(text)
         return result
